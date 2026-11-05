@@ -1,0 +1,64 @@
+/* 外壳：黑白极简，跟随系统深浅色；画布区域完全交给 Excalidraw */
+.shell {
+  --bg: #fff; --bg-side: #f7f7f5; --bg-hover: rgba(0,0,0,.05); --bg-on: rgba(0,0,0,.08);
+  --fg: #1f1f1f; --muted: #8a8a85; --line: rgba(0,0,0,.09); --accent: #1f1f1f; --err: #d1453b;
+  --banner: #eef4ff; --banner-fg: #1d4ed8;
+  display: flex; height: 100%; background: var(--bg); color: var(--fg);
+  font: 13px/1.4 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; user-select: none;
+}
+.shell.dark {
+  --bg: #121212; --bg-side: #1a1a1a; --bg-hover: rgba(255,255,255,.06); --bg-on: rgba(255,255,255,.1);
+  --fg: #e6e6e3; --muted: #8b8b86; --line: rgba(255,255,255,.1); --accent: #e6e6e3;
+  --banner: #1e2a44; --banner-fg: #a9c4ff;
+}
+.shell button { font: inherit; color: inherit; background: none; border: 1px solid var(--line); border-radius: 6px; padding: 5px 12px; cursor: default; }
+.shell button:hover { background: var(--bg-hover); }
+.shell button.icon { border: none; padding: 0 6px; height: 22px; line-height: 22px; border-radius: 5px; color: var(--muted); }
+.shell button.icon:hover { color: var(--fg); }
+.muted { color: var(--muted); }
+.small { font-size: 12px; }
+.pad { padding: 8px 12px; }
+.grow { flex: 1; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.err { color: var(--err); }
+kbd { font: 11px ui-monospace, SFMono-Regular, monospace; color: var(--muted); margin-left: 6px; }
+
+.sidebar { width: 236px; flex: none; display: flex; flex-direction: column; background: var(--bg-side); border-right: 1px solid var(--line); }
+.side-head { display: flex; align-items: center; justify-content: space-between; height: 36px; padding: 0 8px 0 14px; color: var(--muted); font-size: 12px; }
+.side-scroll { flex: 1; overflow: auto; padding-bottom: 12px; }
+.sec { color: var(--muted); font-size: 12px; margin: 14px 14px 4px; }
+.row { display: flex; align-items: center; gap: 4px; height: 26px; margin: 0 6px; padding-right: 6px; border-radius: 5px; white-space: nowrap; }
+.row:hover { background: var(--bg-hover); }
+.row.on { background: var(--bg-on); font-weight: 500; }
+.root-row { padding-left: 8px; font-weight: 500; }
+.chev { width: 14px; color: var(--muted); font-size: 10px; text-align: center; flex: none; }
+.hover-only { visibility: hidden; }
+.row:hover .hover-only { visibility: visible; }
+
+main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.tabbar { display: flex; align-items: center; gap: 2px; height: 36px; padding: 0 6px; border-bottom: 1px solid var(--line); overflow-x: auto; flex: none; }
+.tabbar.empty { border-bottom-color: transparent; }
+.tab { display: flex; align-items: center; gap: 6px; max-width: 220px; height: 26px; padding: 0 4px 0 10px; border-radius: 6px; color: var(--muted); }
+.tab:hover { background: var(--bg-hover); }
+.tab.on { background: var(--bg-on); color: var(--fg); }
+.tab .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); flex: none; }
+.tab .close { visibility: hidden; }
+.tab:hover .close, .tab.on .close { visibility: visible; }
+
+.editor { position: relative; flex: 1; min-height: 0; }
+.banner { position: absolute; z-index: 5; top: 60px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 14px; border-radius: 8px; background: var(--banner); color: var(--banner-fg); font-size: 12px; white-space: nowrap; }
+.placeholder { height: 100%; display: flex; flex-direction: column; gap: 10px; align-items: center; justify-content: center; }
+
+.statusbar { display: flex; align-items: center; gap: 16px; height: 24px; padding: 0 12px; border-top: 1px solid var(--line); color: var(--muted); font-size: 11px; flex: none; }
+.statusbar .path { max-width: 50%; }
+
+.welcome { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 24px; }
+.welcome h1 { font-size: 20px; font-weight: 500; margin: 0; }
+.welcome .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; width: min(560px, 100%); margin-top: 12px; }
+.welcome .card { display: flex; flex-direction: column; gap: 6px; text-align: left; padding: 14px; border-radius: 10px; }
+.welcome .card.primary { border: 2px solid var(--accent); }
+.welcome .actions { display: flex; gap: 10px; }
+.welcome .recent { width: min(520px, 100%); margin-top: 20px; }
+.welcome .recent .row { margin: 0; padding-left: 10px; gap: 12px; }
+
+.toast { position: fixed; z-index: 20; left: 50%; bottom: 40px; transform: translateX(-50%); padding: 8px 14px; border-radius: 8px; background: var(--fg); color: var(--bg); font-size: 12px; max-width: 70%; }

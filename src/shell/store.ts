@@ -4,6 +4,23 @@ import type { SyncStatus, TreeNode, Viewport } from "./ipc";
 
 export type SaveState = "saved" | "dirty" | "saving" | "error";
 
+export type Settings = {
+  theme: "system" | "light" | "dark";
+  lang: "system" | "zh" | "en";
+  /** 侧边栏排序，默认最新修改的在上面 */
+  sort: "mtime" | "ctime" | "name";
+};
+const DEFAULT_SETTINGS: Settings = { theme: "system", lang: "system", sort: "mtime" };
+const loadSettings = (): Settings => {
+  try {
+    return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("settings") ?? "{}") };
+  } catch {
+    return DEFAULT_SETTINGS;
+  }
+};
+const effectiveLang = (s: Settings): "zh" | "en" =>
+  s.lang !== "system" ? s.lang : navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en";
+
 export type Tab = {
   path: string;
   title: string;
@@ -16,6 +33,8 @@ export type Tab = {
   banner?: string;
   /** 文件在外部被删除或移走 */
   missing?: boolean;
+  /** 开始打开的时间：打开太久时提示可能在等 iCloud 下载 */
+  openedAt?: number;
 };
 
 export type ShellState = {
@@ -34,6 +53,10 @@ export type ShellState = {
   history: boolean;
   fullscreen: boolean;
   sidebarWidth: number;
+  settings: Settings;
+  /** 实际生效的界面语言 */
+  lang: "zh" | "en";
+  settingsOpen: boolean;
 };
 
 let state: ShellState = {
@@ -41,7 +64,16 @@ let state: ShellState = {
   sidebar: localStorage.getItem("sidebar") !== "0", focus: false, sync: {},
   renaming: null, history: false, fullscreen: false,
   sidebarWidth: Number(localStorage.getItem("sidebarWidth")) || 240,
+  settings: loadSettings(),
+  lang: effectiveLang(loadSettings()),
+  settingsOpen: false,
 };
+
+export function updateSettings(patch: Partial<Settings>) {
+  const settings = { ...state.settings, ...patch };
+  localStorage.setItem("settings", JSON.stringify(settings));
+  setState({ settings, lang: effectiveLang(settings) });
+}
 const listeners = new Set<() => void>();
 
 export const getState = () => state;

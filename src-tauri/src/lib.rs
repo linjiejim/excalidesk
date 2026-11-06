@@ -130,14 +130,44 @@ async fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Sen
 
 // ── 工作区 ─────────────────────────────────────────────
 
+/// 顺手清掉最近打开里已经不存在的文件（被删、被移走）
 #[tauri::command]
 fn state_get(app: AppHandle) -> Persisted {
+    app.state::<StateFile>().update(|d| d.recent.retain(|p| Path::new(p).exists()));
     app.state::<StateFile>().snapshot()
 }
 
 #[tauri::command]
-async fn workspace_pick(app: AppHandle) -> Result<Option<String>, String> {
-    let picked = app.dialog().file().set_title("选择一个放图的文件夹").blocking_pick_folder();
+fn recent_remove(app: AppHandle, path: String) {
+    app.state::<StateFile>().update(|d| d.recent.retain(|p| p != &path && !p.starts_with(&format!("{path}/"))));
+}
+
+/// 侧边栏里拖动调整工作区顺序；只接受现有工作区的一个排列
+#[tauri::command]
+fn workspace_reorder(app: AppHandle, roots: Vec<String>) -> Result<(), String> {
+    app.state::<StateFile>().update(|d| {
+        let mut a = d.roots.clone();
+        let mut b = roots.clone();
+        a.sort();
+        b.sort();
+        if a != b {
+            return Err("err.reorder".to_string());
+        }
+        d.roots = roots;
+        Ok(())
+    })
+}
+
+/// 切换界面语言时重建原生菜单
+#[tauri::command]
+fn set_menu_lang(app: AppHandle, lang: String) -> Result<(), String> {
+    let m = menu::build(&app, &lang).map_err(|e| e.to_string())?;
+    app.set_menu(m).map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn workspace_pick(app: AppHandle, title: String) -> Result<Option<String>, String> {
+    let picked = app.dialog().file().set_title(title).blocking_pick_folder();
     let Some(p) = picked.and_then(|p| p.into_path().ok()) else { return Ok(None) };
     let s = p.display().to_string();
     app.state::<StateFile>().update(|d| {
@@ -200,7 +230,7 @@ fn icloud_default_dir(app: AppHandle) -> Result<String, String> {
     let home = std::env::var("HOME").map_err(|e| e.to_string())?;
     let drive = PathBuf::from(home).join("Library/Mobile Documents/com~apple~CloudDocs");
     if !drive.exists() {
-        return Err("这台 Mac 没有开启 iCloud Drive".into());
+        return Err("err.no_icloud".into());
     }
     let d = drive.join("Excalidraw");
     fs::create_dir_all(&d).map_err(|e| e.to_string())?;
@@ -268,7 +298,7 @@ async fn doc_save(app: AppHandle, request: Request<'_>) -> Result<SaveResult, St
 
 #[tauri::command]
 fn doc_create(dir: String, base: Option<String>) -> Result<String, String> {
-    let p = workspace::unique_name(&PathBuf::from(dir), base.as_deref().unwrap_or("未命名"));
+    let p = workspace::unique_name(&PathBuf::from(dir), base.as_deref().unwrap_or("Untitled"));
     doc::write_file(&p, &Doc::default().serialize())?;
     Ok(p.display().to_string())
 }
@@ -323,7 +353,7 @@ fn conflicts_resolve(path: String) -> Result<(), String> {
 fn check_name(name: &str) -> Result<String, String> {
     let n = name.trim();
     if n.is_empty() || n.contains('/') || n.starts_with('.') || n.contains(':') {
-        return Err("名字不能为空，也不能包含 / 或 :，不能以 . 开头".into());
+        return Err("err.name_invalid".into());
     }
     Ok(n.to_string())
 }
@@ -337,12 +367,12 @@ async fn path_rename(app: AppHandle, from: String, name: String) -> Result<Strin
     if is_file && !n.ends_with(workspace::EXT) {
         n.push_str(workspace::EXT);
     }
-    let dst = src.parent().ok_or("没有上级目录")?.join(&n);
+    let dst = src.parent().ok_or("err.no_parent")?.join(&n);
     if dst == src {
         return Ok(from);
     }
     if dst.exists() {
-        return Err(format!("「{n}」已经存在"));
+        return Err(format!("err.exists:{n}"));
     }
     let to = dst.display().to_string();
     let a = app.clone();
@@ -381,11 +411,11 @@ async fn path_rename(app: AppHandle, from: String, name: String) -> Result<Strin
 }
 
 #[tauri::command]
-async fn path_duplicate(path: String) -> Result<String, String> {
+async fn path_duplicate(path: String, suffix: String) -> Result<String, String> {
     blocking(move || {
         let src = PathBuf::from(&path);
         let stem = src.file_name().map(|n| n.to_string_lossy().trim_end_matches(workspace::EXT).to_string()).unwrap_or_default();
-        let dst = workspace::unique_name(src.parent().ok_or("没有上级目录")?, &format!("{stem} 副本"));
+        let dst = workspace::unique_name(src.parent().ok_or("err.no_parent")?, &format!("{stem} {suffix}"));
         let bytes = doc::read_file(&src)?;
         doc::write_file(&dst, &bytes)?;
         Ok(dst.display().to_string())
@@ -408,7 +438,7 @@ async fn path_trash(app: AppHandle, path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn dir_create(parent: String, name: Option<String>) -> Result<String, String> {
-    let base = check_name(name.as_deref().unwrap_or("新建文件夹"))?;
+    let base = check_name(name.as_deref().unwrap_or("New Folder"))?;
     let d = workspace::unique_with_ext(&PathBuf::from(parent), &base, "");
     fs::create_dir(&d).map_err(|e| e.to_string())?;
     Ok(d.display().to_string())
@@ -422,13 +452,13 @@ fn copy_text(text: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn confirm(app: AppHandle, title: String, message: String, ok: String) -> bool {
+async fn confirm(app: AppHandle, title: String, message: String, ok: String, cancel: String) -> bool {
     use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind};
     app.dialog()
         .message(message)
         .title(title)
         .kind(MessageDialogKind::Warning)
-        .buttons(MessageDialogButtons::OkCancelCustom(ok, "取消".into()))
+        .buttons(MessageDialogButtons::OkCancelCustom(ok, cancel))
         .blocking_show()
 }
 
@@ -565,6 +595,7 @@ pub fn run() {
             doc_open, doc_disk_status, doc_close, doc_save, doc_create,
             history_list, history_read, history_snapshot, conflicts_list, conflict_read, conflicts_resolve,
             path_rename, path_duplicate, path_trash, dir_create, copy_text, confirm, debug_remove,
+            recent_remove, workspace_reorder, set_menu_lang,
             pick_open_file, pick_save_path, write_bytes, close_now,
             bench_result, save_doc, opts, icloud::icloud_probe, selftest_dir, debug_read, debug_size, external_edit,
         ])
@@ -574,7 +605,7 @@ pub fn run() {
             });
             app.manage(HistoryRoot(state_path.parent().map(|p| p.join("history")).unwrap_or_else(|| std::env::temp_dir().join("excalidesk-history"))));
             app.manage(StateFile::load(state_path));
-            app.set_menu(menu::build(app.handle())?)?;
+            app.set_menu(menu::build(app.handle(), "zh")?)?;
             app.on_menu_event(|app, ev| {
                 let _ = app.emit("menu", ev.id().0.clone());
             });

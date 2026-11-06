@@ -1,5 +1,6 @@
 // 外壳动作：工作区、标签页、文件操作、导出、历史、监听、退出前保存。组件、菜单和右键菜单都只调这里。
 import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
+import { t, tErr } from "./i18n";
 import { basename, dirname, inTauri, ipc, isICloud } from "./ipc";
 import { DocSession } from "./session";
 import { getState, setState, toast, updateTab } from "./store";
@@ -44,14 +45,14 @@ export async function addRoot(picked: string | null) {
 }
 
 export async function pickRoot() {
-  return addRoot(await ipc.pickWorkspace());
+  return addRoot(await ipc.pickWorkspace(t("dialog.pickFolder")));
 }
 
 export async function useICloudRoot() {
   try {
     await addRoot(await ipc.icloudDefaultDir());
   } catch (e) {
-    toast(String(e));
+    toast(tErr(e));
   }
 }
 
@@ -65,12 +66,27 @@ export async function removeRoot(path: string) {
   await rewatch();
 }
 
+/** 侧边栏拖动工作区：把 from 放到 target 的上方或下方 */
+export async function moveRoot(from: string, target: string, below: boolean) {
+  if (from === target) return;
+  const roots = getState().roots.filter((r) => r !== from);
+  const j = roots.indexOf(target);
+  if (j < 0) return;
+  roots.splice(below ? j + 1 : j, 0, from);
+  setState({ roots });
+  try {
+    await ipc.reorderRoots(roots);
+  } catch (e) {
+    toast(tErr(e));
+  }
+}
+
 // ── 标签页 ─────────────────────────────────────────────
 
 export async function openPath(requested: string) {
   const path = await ipc.realPath(requested);
   if (!path.endsWith(".excalidraw")) {
-    toast("只能打开 .excalidraw 文件");
+    toast(t("toast.onlyExcalidraw"));
     return;
   }
   if (sessions.has(path)) {
@@ -80,13 +96,15 @@ export async function openPath(requested: string) {
   const s = new DocSession(path);
   sessions.set(path, s);
   setState((st) => ({
-    tabs: [...st.tabs, { path, title: basename(path), phase: "loading", save: "saved", elements: 0 }],
+    tabs: [...st.tabs, { path, title: basename(path), phase: "loading", save: "saved", elements: 0, openedAt: Date.now() }],
   }));
   await activate(path);
+  // iCloud 里还没下载的文件：先拿到状态，界面显示「正在下载」而不是「正在打开」
+  if (isICloud(path)) await refreshSync(path).catch(() => {});
   try {
     await s.load();
   } catch (e) {
-    updateTab(path, { phase: "error", error: String(e) });
+    updateTab(path, { phase: "error", error: tErr(e) });
   }
   setState((st) => ({ recent: [path, ...st.recent.filter((r) => r !== path)].slice(0, 20) }));
   refreshSync(path);
@@ -137,23 +155,23 @@ export async function newDoc(dir?: string) {
   const { active, roots } = getState();
   const target = dir ?? (active && rootOf(active) ? dirname(active) : roots[0]);
   if (!target) {
-    toast("先添加一个文件夹，新图会放在那里");
+    toast(t("toast.addFolderFirst"));
     await pickRoot();
     if (!getState().roots[0]) return;
     return newDoc();
   }
-  const path = await ipc.createDoc(target);
+  const path = await ipc.createDoc(target, t("app.untitled"));
   await refreshRootOf(path);
   await openPath(path);
 }
 
 export async function newFolder(parent: string) {
   try {
-    const p = await ipc.mkdir(parent);
+    const p = await ipc.mkdir(parent, t("app.newFolder"));
     await refreshRootOf(p);
     setState({ renaming: p });
   } catch (e) {
-    toast(`新建文件夹失败：${e}`);
+    toast(t("toast.mkdirFailed", { error: tErr(e) }));
   }
 }
 
@@ -168,7 +186,7 @@ export async function renamePath(from: string, name: string) {
     if (s) await s.flush();
     to = await ipc.rename(from, name);
   } catch (e) {
-    toast(String(e));
+    toast(tErr(e));
     return;
   }
   const map = (p: string) => (p === from ? to : p.startsWith(from + "/") ? to + p.slice(from.length) : null);
@@ -183,7 +201,6 @@ export async function renamePath(from: string, name: string) {
   setState((st) => {
     const viewports: typeof st.viewports = {};
     for (const [k, v] of Object.entries(st.viewports)) viewports[map(k) ?? k] = v;
-    const sync = { ...st.sync };
     return {
       tabs: st.tabs.map((t) => {
         const n = map(t.path);
@@ -192,7 +209,6 @@ export async function renamePath(from: string, name: string) {
       active: st.active ? (map(st.active) ?? st.active) : null,
       recent: st.recent.map((r) => map(r) ?? r),
       viewports,
-      sync,
     };
   });
   await refreshRootOf(to);
@@ -203,17 +219,17 @@ export async function duplicatePath(path: string) {
   try {
     const s = sessions.get(path);
     if (s) await s.flush();
-    const p = await ipc.duplicate(path);
+    const p = await ipc.duplicate(path, t("app.copySuffix"));
     await refreshRootOf(p);
-    toast(`已创建「${basename(p)}」`);
+    toast(t("toast.created", { name: basename(p) }));
   } catch (e) {
-    toast(`创建副本失败：${e}`);
+    toast(t("toast.duplicateFailed", { error: tErr(e) }));
   }
 }
 
 export async function trashPath(path: string, isDir: boolean) {
   const name = path.split("/").pop()!;
-  if (isDir && !(await ipc.confirm("移到废纸篓", `把文件夹「${name}」和里面的所有内容移到废纸篓？`, "移到废纸篓"))) return;
+  if (isDir && !(await ipc.confirm(t("dialog.trashTitle"), t("dialog.trashFolder", { name }), t("menu.trash"), t("app.cancel")))) return;
   // 关掉受影响的标签，不再保存（否则会把刚删掉的文件写回来）
   for (const [p, s] of [...sessions]) {
     if (under(p, path)) {
@@ -223,16 +239,25 @@ export async function trashPath(path: string, isDir: boolean) {
   }
   try {
     await ipc.trash(path);
-    toast(`「${name.replace(/\.excalidraw$/, "")}」已移到废纸篓`);
+    toast(t("toast.trashed", { name: name.replace(/\.excalidraw$/, "") }));
   } catch (e) {
-    toast(`移到废纸篓失败：${e}`);
+    toast(t("toast.trashFailed", { error: tErr(e) }));
+    return;
   }
+  // 最近打开里也拿掉
+  await ipc.recentRemove(path);
+  setState((st) => ({ recent: st.recent.filter((r) => !under(r, path)) }));
   await refreshRootOf(path);
+}
+
+export async function removeRecent(path: string) {
+  await ipc.recentRemove(path);
+  setState((st) => ({ recent: st.recent.filter((r) => r !== path) }));
 }
 
 export async function copyPath(path: string) {
   await ipc.copyText(path);
-  toast("路径已拷贝");
+  toast(t("toast.pathCopied"));
 }
 
 export async function openFileDialog() {
@@ -276,7 +301,7 @@ export async function exportActive(kind: "png" | "svg", target?: string) {
     bytes = new TextEncoder().encode(svg.outerHTML);
   }
   await ipc.writeBytes(path, bytes);
-  if (!target) toast(`已导出 ${path.split("/").pop()}`);
+  if (!target) toast(t("toast.exported", { name: path.split("/").pop()! }));
 }
 
 export function toggleHistory(open?: boolean) {
@@ -299,7 +324,7 @@ export async function historyAsCopy(id: string, ts: number) {
   const d = new Date(ts);
   const stamp = `${d.getMonth() + 1}-${d.getDate()} ${String(d.getHours()).padStart(2, "0")}${String(d.getMinutes()).padStart(2, "0")}`;
   const text = await ipc.historyRead(active, id);
-  const p = await ipc.createDoc(dirname(active), `${basename(active)}（历史 ${stamp}）`);
+  const p = await ipc.createDoc(dirname(active), t("history.copyName", { name: basename(active), stamp }));
   await ipc.writeBytes(p, new TextEncoder().encode(text));
   await refreshRootOf(p);
   setState({ history: false });
@@ -315,12 +340,12 @@ export async function refreshSync(path: string | null) {
   setState((s) => ({ sync: { ...s.sync, [path]: st } }));
   // 发现 iCloud 冲突版本：自动按元素合并
   const s = sessions.get(path);
-  if (st.conflict && s && !resolving.has(path)) {
+  if (st.conflict && s && s.api && !resolving.has(path)) {
     resolving.add(path);
     try {
       await s.resolveConflicts();
     } catch (e) {
-      toast(`合并 iCloud 冲突版本失败：${e}`);
+      toast(t("toast.conflictFailed", { error: tErr(e) }));
     } finally {
       resolving.delete(path);
     }
@@ -343,7 +368,7 @@ export function onFsChanged(paths: string[]) {
         try {
           await s.checkExternal();
         } catch (e) {
-          toast(`读取外部修改失败：${e}`);
+          toast(t("toast.externalFailed", { error: tErr(e) }));
         }
       }
     }
@@ -360,7 +385,7 @@ export async function closeApp() {
   }
   const bad = getState().tabs.filter((t) => !t.missing && (t.save === "error" || t.save === "dirty"));
   if (bad.length && closeAttempts++ === 0) {
-    toast(`${bad.length} 个文件没保存成功（${bad.map((t) => t.title).join("、")}），再关一次会直接退出`);
+    toast(t("toast.unsaved", { n: bad.length, names: bad.map((x) => x.title).join(getState().lang === "zh" ? "、" : ", ") }));
     return;
   }
   await ipc.closeNow();
@@ -376,4 +401,12 @@ export async function syncWindowTitle(title: string) {
   if (!inTauri) return;
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   getCurrentWindow().setTitle(title ? `${title} — Excalidesk` : "Excalidesk");
+}
+
+/** 原生部分跟着设置走：菜单语言、窗口外观（红绿灯、滚动条、系统对话框的深浅色） */
+export async function syncNative(lang: "zh" | "en", theme: "system" | "light" | "dark") {
+  if (!inTauri) return;
+  await ipc.setMenuLang(lang).catch(() => {});
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().setTheme(theme === "system" ? null : theme).catch(() => {});
 }

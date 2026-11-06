@@ -1,15 +1,16 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import "./shell.css";
 import { Editor } from "./Editor";
 import { basename, dirname, inTauri, ipc, isICloud, type HistoryEntry, type TreeNode } from "./ipc";
-import { getState, setState, useShell, type Tab } from "./store";
+import { getState, setState, updateSettings, useShell, type Settings, type Tab } from "./store";
+import { t, useT, type Key } from "./i18n";
 import { popup } from "./contextMenu";
 import {
   activate, boot, closeApp, closeOthers, closeTab, copyPath, cycleTab, duplicatePath, exportActive, flushAll,
-  historyAsCopy, newDoc, newFolder, onFsChanged, openFileDialog, openPath, pickRoot, refreshSync, removeRoot,
-  renamePath, restoreHistory, revealActive, saveMissingAs, sessions, syncWindowTitle, toggleHistory, trashPath,
-  useICloudRoot,
+  historyAsCopy, moveRoot, newDoc, newFolder, onFsChanged, openFileDialog, openPath, pickRoot, refreshSync,
+  removeRecent, removeRoot, renamePath, restoreHistory, revealActive, saveMissingAs, sessions, syncNative,
+  syncWindowTitle, toggleHistory, trashPath, useICloudRoot,
 } from "./actions";
 import { runSelftest } from "./selftest";
 
@@ -18,7 +19,7 @@ const SELFTEST = new URLSearchParams(location.search).get("selftest") === "1";
 const ICLOUD_ROOT = /^\/Users\/[^/]+\/Library\/Mobile Documents\/com~apple~CloudDocs/;
 export const prettyPath = (p: string) => p.replace(ICLOUD_ROOT, "iCloud Drive").replace(/^\/Users\/[^/]+/, "~");
 
-function useSystemTheme() {
+function useSystemDark() {
   const mq = window.matchMedia("(prefers-color-scheme: dark)");
   const [dark, setDark] = useState(mq.matches);
   useEffect(() => {
@@ -26,7 +27,7 @@ function useSystemTheme() {
     mq.addEventListener("change", f);
     return () => mq.removeEventListener("change", f);
   }, []);
-  return dark ? "dark" : "light";
+  return dark;
 }
 
 function onMenu(id: string) {
@@ -45,6 +46,7 @@ function onMenu(id: string) {
     case "focus_mode": return setState((s) => ({ focus: !s.focus }));
     case "next_tab": return cycleTab(1);
     case "prev_tab": return cycleTab(-1);
+    case "settings": return setState({ settingsOpen: true });
   }
 }
 
@@ -67,12 +69,30 @@ const Icon = {
   close: <Svg size={11}><path d="M4 4l8 8M12 4l-8 8" /></Svg>,
   sidebar: <Svg size={15}><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M6 3v10" /></Svg>,
   history: <Svg><path d="M2.8 8a5.2 5.2 0 1 0 1.5-3.7" /><path d="M2.5 2.8v2.4h2.4" /><path d="M8 5.2V8l1.8 1.2" /></Svg>,
+  sort: <Svg><path d="M4.5 3v10M2.5 11l2 2 2-2M9 4.5h4.5M9 8h3.2M9 11.5h2" /></Svg>,
+  gear: <Svg size={15}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></Svg>,
 };
+
+/** App 标志：随主题变色的矢量版（纸面、紫色手绘圆、铅笔） */
+const Logo = ({ text = true }: { text?: boolean }) => (
+  <span className="logo" title="Excalidesk">
+    <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="1.5" y="1.5" width="21" height="21" rx="6" className="logo-tile" />
+      <path d="M12.6 6.2c-3.6-.6-6.7 1.6-6.9 4.9-.2 3.4 2.5 6 5.9 5.9 1.4-.1 2.6-.5 3.5-1.3" className="logo-ring" />
+      <path d="M18.2 6.4l-5.6 8" className="logo-pencil" />
+      <path d="M12.6 14.4l-.7 1.9 1.7-1.1z" className="logo-tip" />
+    </svg>
+    {text && <b>Excalidesk</b>}
+  </span>
+);
 
 // ── 外壳 ───────────────────────────────────────────────
 
 export default function Shell() {
-  const theme = useSystemTheme();
+  const systemDark = useSystemDark();
+  const settings = useShell((s) => s.settings);
+  const lang = useShell((s) => s.lang);
+  const theme: "light" | "dark" = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
   const sidebar = useShell((s) => s.sidebar && !s.focus);
   const focus = useShell((s) => s.focus);
   const fullscreen = useShell((s) => s.fullscreen);
@@ -82,6 +102,10 @@ export default function Shell() {
   useEffect(() => {
     syncWindowTitle(activeTitle);
   }, [activeTitle]);
+  useEffect(() => {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    syncNative(lang, settings.theme);
+  }, [lang, settings.theme]);
 
   useEffect(() => {
     const un: Promise<() => void>[] = !inTauri ? [] : [
@@ -102,11 +126,16 @@ export default function Shell() {
       if (SELFTEST) runSelftest();
     })();
     const onBlur = () => flushAll();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && getState().settingsOpen) setState({ settingsOpen: false });
+    };
     window.addEventListener("blur", onBlur);
+    window.addEventListener("keydown", onKey);
     const sync = window.setInterval(() => refreshSync(getState().active), 4000);
     return () => {
       un.forEach((p) => p.then((f) => f()));
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("keydown", onKey);
       clearInterval(sync);
     };
   }, []);
@@ -117,11 +146,12 @@ export default function Shell() {
       <main>
         {focus ? <div className="focus-strip" data-tauri-drag-region /> : <TabBar />}
         <div className="workspace">
-          <EditorArea theme={theme} />
+          <EditorArea theme={theme} lang={lang} />
           <HistoryPanel />
         </div>
         {!focus && <StatusBar />}
       </main>
+      <SettingsDialog />
       <Toast />
     </div>
   );
@@ -129,28 +159,43 @@ export default function Shell() {
 
 // ── 侧边栏 ─────────────────────────────────────────────
 
+function sortMenu() {
+  const cur = getState().settings.sort;
+  const opt = (k: Settings["sort"], key: Key) => ({ text: `${cur === k ? "✓ " : "    "}${t(key)}`, action: () => updateSettings({ sort: k }) });
+  popup([opt("mtime", "sort.mtime"), opt("ctime", "sort.ctime"), opt("name", "sort.name")]);
+}
+
 function Sidebar({ width }: { width: number }) {
+  const t = useT();
   const roots = useShell((s) => s.roots);
   const recent = useShell((s) => s.recent);
   const outside = recent.filter((p) => !roots.some((r) => p.startsWith(r + "/"))).slice(0, 6);
   return (
-    <aside className="sidebar" style={{ width }} onContextMenu={(e) => { e.preventDefault(); popup([{ text: "添加文件夹…", action: pickRoot }]); }}>
+    <aside className="sidebar" style={{ width }} onContextMenu={(e) => { e.preventDefault(); popup([{ text: `${t("side.addFolder")}…`, action: pickRoot }]); }}>
       <div className="side-top" data-tauri-drag-region>
-        <button className="icon" title="隐藏侧边栏（⌘\）" onClick={() => setSidebar(false)}>{Icon.sidebar}</button>
+        <Logo />
+        <span className="grow" data-tauri-drag-region />
+        <button className="icon" title={t("side.hide")} onClick={() => setSidebar(false)}>{Icon.sidebar}</button>
       </div>
       <div className="side-head">
-        <span>工作区</span>
-        <button className="icon" title="添加文件夹（⇧⌘O）" onClick={pickRoot}>{Icon.plus}</button>
+        <span>{t("side.workspaces")}</span>
+        <span className="side-head-actions">
+          <button className="icon" title={t("side.sort")} onClick={sortMenu}>{Icon.sort}</button>
+          <button className="icon" title={t("side.addFolderHint")} onClick={pickRoot}>{Icon.plus}</button>
+        </span>
       </div>
       <div className="side-scroll">
         {roots.map((r) => <RootSection key={r} root={r} />)}
-        {roots.length === 0 && <div className="muted pad">还没有工作区。添加一个文件夹，里面的 .excalidraw 都会列在这里。</div>}
+        {roots.length === 0 && <div className="muted pad">{t("side.empty")}</div>}
         {outside.length > 0 && (
           <>
-            <div className="sec">其他最近打开</div>
-            {outside.map((p) => <FileRow key={p} path={p} name={basename(p)} depth={0} dataless={false} />)}
+            <div className="sec">{t("side.otherRecent")}</div>
+            {outside.map((p) => <FileRow key={p} path={p} name={basename(p)} depth={0} dataless={false} recentOnly />)}
           </>
         )}
+      </div>
+      <div className="side-foot">
+        <button className="icon" title={t("side.settings")} onClick={() => setState({ settingsOpen: true })}>{Icon.gear}</button>
       </div>
       <Resizer />
     </aside>
@@ -172,60 +217,106 @@ function Resizer() {
   return <div className="resizer" onPointerDown={onDown} onDoubleClick={() => { setState({ sidebarWidth: 240 }); localStorage.removeItem("sidebarWidth"); }} />;
 }
 
-const openSet = new Set<string>(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
+const collapsedSet = new Set<string>(JSON.parse(localStorage.getItem("collapsed") ?? "[]"));
 function useCollapsed(path: string): [boolean, () => void] {
-  const [collapsed, set] = useState(openSet.has(path));
+  const [collapsed, set] = useState(collapsedSet.has(path));
   return [collapsed, () => {
-    collapsed ? openSet.delete(path) : openSet.add(path);
-    localStorage.setItem("collapsed", JSON.stringify([...openSet]));
+    collapsed ? collapsedSet.delete(path) : collapsedSet.add(path);
+    localStorage.setItem("collapsed", JSON.stringify([...collapsedSet]));
     set(!collapsed);
   }];
 }
 
+/** 文件夹在前；文件夹的时间取它里面最新的那张图 */
+export function sortTree(nodes: TreeNode[], mode: Settings["sort"], lang: string): TreeNode[] {
+  const coll = new Intl.Collator(lang === "zh" ? "zh-CN" : "en", { numeric: true, sensitivity: "base" });
+  const own = (n: TreeNode) => (mode === "ctime" ? n.ctime : n.mtime);
+  const time = (n: TreeNode): number => (n.dir ? Math.max(own(n), ...(n.children ?? []).map(time)) : own(n));
+  const sorted = [...nodes].sort((a, b) => {
+    if (a.dir !== b.dir) return a.dir ? -1 : 1;
+    if (mode !== "name") {
+      const d = time(b) - time(a);
+      if (d) return d;
+    }
+    return coll.compare(a.name, b.name);
+  });
+  return sorted.map((n) => (n.dir && n.children ? { ...n, children: sortTree(n.children, mode, lang) } : n));
+}
+
 function folderMenu(path: string, isRoot: boolean) {
   popup([
-    { text: "新建图", action: () => newDoc(path) },
-    { text: "新建文件夹", action: () => newFolder(path) },
+    { text: t("menu.newDrawing"), action: () => newDoc(path) },
+    { text: t("menu.newFolder"), action: () => newFolder(path) },
     "-",
-    ...(isRoot ? [] : [{ text: "重命名…", action: () => setState({ renaming: path }) }]),
-    { text: "在 Finder 中显示", action: () => ipc.reveal(path) },
-    { text: "拷贝路径", action: () => copyPath(path) },
+    ...(isRoot ? [] : [{ text: t("menu.rename"), action: () => setState({ renaming: path }) }]),
+    { text: t("menu.reveal"), action: () => ipc.reveal(path) },
+    { text: t("menu.copyPath"), action: () => copyPath(path) },
     "-",
-    isRoot ? { text: "从侧边栏移除", action: () => removeRoot(path) } : { text: "移到废纸篓", action: () => trashPath(path, true) },
+    isRoot ? { text: t("menu.removeRoot"), action: () => removeRoot(path) } : { text: t("menu.trash"), action: () => trashPath(path, true) },
   ]);
 }
 
-function fileMenu(path: string) {
+function fileMenu(path: string, recentOnly: boolean) {
   const open = sessions.has(path);
   popup([
-    { text: "打开", action: () => openPath(path) },
+    { text: t("menu.open"), action: () => openPath(path) },
     "-",
-    { text: "重命名…", action: () => setState({ renaming: path }) },
-    { text: "创建副本", action: () => duplicatePath(path) },
-    { text: "历史版本…", action: async () => { await openPath(path); toggleHistory(true); } },
+    { text: t("menu.rename"), action: () => setState({ renaming: path }) },
+    { text: t("menu.duplicate"), action: () => duplicatePath(path) },
+    { text: t("menu.history"), action: async () => { await openPath(path); toggleHistory(true); } },
     "-",
-    { text: "在 Finder 中显示", action: () => ipc.reveal(path) },
-    { text: "拷贝路径", action: () => copyPath(path) },
+    { text: t("menu.reveal"), action: () => ipc.reveal(path) },
+    { text: t("menu.copyPath"), action: () => copyPath(path) },
+    ...(recentOnly ? [{ text: t("menu.removeRecent"), action: () => removeRecent(path) }] : []),
     "-",
-    { text: open ? "关闭并移到废纸篓" : "移到废纸篓", action: () => trashPath(path, false) },
+    { text: open ? t("menu.closeAndTrash") : t("menu.trash"), action: () => trashPath(path, false) },
   ]);
 }
 
+/** 正在拖动的工作区（HTML5 拖放；Tauri 自己的文件拖放已关掉，所以 WebView 里的拖放可用） */
+let draggingRoot: string | null = null;
+
 function RootSection({ root }: { root: string }) {
+  const t = useT();
   const nodes = useShell((s) => s.trees[root]);
+  const sort = useShell((s) => s.settings.sort);
+  const lang = useShell((s) => s.lang);
+  const sorted = useMemo(() => (nodes ? sortTree(nodes, sort, lang) : nodes), [nodes, sort, lang]);
   const [collapsed, toggle] = useCollapsed(root);
+  const [drop, setDrop] = useState<"" | "above" | "below">("");
   const icloud = isICloud(root);
   return (
-    <div className="root">
-      <div className="row root-row" onClick={toggle} title={prettyPath(root)} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); folderMenu(root, true); }}>
+    <div className={`root ${drop ? `drop-${drop}` : ""}`}>
+      <div
+        className="row root-row"
+        draggable
+        onDragStart={(e) => { draggingRoot = root; e.dataTransfer.effectAllowed = "move"; e.dataTransfer.setData("text/plain", root); }}
+        onDragEnd={() => { draggingRoot = null; setDrop(""); }}
+        onDragOver={(e) => {
+          if (!draggingRoot || draggingRoot === root) return;
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          setDrop(e.clientY < r.top + r.height / 2 ? "above" : "below");
+        }}
+        onDragLeave={() => setDrop("")}
+        onDrop={(e) => {
+          e.preventDefault();
+          const from = draggingRoot, below = drop === "below";
+          setDrop("");
+          if (from && from !== root) moveRoot(from, root, below);
+        }}
+        onClick={toggle}
+        title={`${prettyPath(root)} · ${t("side.dragHint")}`}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); folderMenu(root, true); }}
+      >
         {Icon.chevron(!collapsed)}
         <span className="row-icon">{icloud ? Icon.cloud : Icon.folder}</span>
         <span className="grow ellipsis">{basename(root)}</span>
-        <button className="icon hover-only" title="在这里新建图" onClick={(e) => { e.stopPropagation(); newDoc(root); }}>{Icon.plus}</button>
+        <button className="icon hover-only" title={t("side.newHere")} onClick={(e) => { e.stopPropagation(); newDoc(root); }}>{Icon.plus}</button>
       </div>
-      {!collapsed && (nodes?.length
-        ? nodes.map((n) => <TreeItem key={n.path} node={n} depth={1} />)
-        : <div className="muted row empty-row">{nodes ? "还没有图" : "读取中…"}</div>)}
+      {!collapsed && (sorted?.length
+        ? sorted.map((n) => <TreeItem key={n.path} node={n} depth={1} />)
+        : <div className="muted row empty-row">{sorted ? t("side.noDrawings") : t("side.loading")}</div>)}
     </div>
   );
 }
@@ -236,7 +327,13 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
   if (!node.dir) return <FileRow path={node.path} name={node.name} depth={depth} dataless={node.dataless} />;
   return (
     <>
-      <div className="row" style={{ paddingLeft: 6 + depth * 14 }} onClick={toggle} onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); folderMenu(node.path, false); }}>
+      <div
+        className="row"
+        style={{ paddingLeft: 6 + depth * 14 }}
+        onClick={toggle}
+        onDoubleClick={(e) => { e.stopPropagation(); setState({ renaming: node.path }); }}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); folderMenu(node.path, false); }}
+      >
         {Icon.chevron(!collapsed)}
         <span className="row-icon">{Icon.folder}</span>
         {renaming ? <RenameInput path={node.path} initial={node.name} /> : <span className="grow ellipsis">{node.name}</span>}
@@ -246,22 +343,24 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
   );
 }
 
-function FileRow({ path, name, depth, dataless }: { path: string; name: string; depth: number; dataless: boolean }) {
+function FileRow({ path, name, depth, dataless, recentOnly = false }: { path: string; name: string; depth: number; dataless: boolean; recentOnly?: boolean }) {
+  const t = useT();
   const active = useShell((s) => s.active === path);
   const renaming = useShell((s) => s.renaming === path);
-  const tab = useShell((s) => s.tabs.find((t) => t.path === path));
+  const tab = useShell((s) => s.tabs.find((x) => x.path === path));
   return (
     <div
       className={`row file ${active ? "on" : ""}`}
       style={{ paddingLeft: 20 + depth * 14 }}
       onClick={() => !renaming && openPath(path)}
-      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); fileMenu(path); }}
+      onDoubleClick={(e) => { e.stopPropagation(); setState({ renaming: path }); }}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); fileMenu(path, recentOnly); }}
       title={prettyPath(path)}
     >
       <span className="row-icon">{Icon.file}</span>
       {renaming ? <RenameInput path={path} initial={name} /> : <span className="grow ellipsis">{name}</span>}
       {tab && tab.save !== "saved" && !renaming && <span className="dot" />}
-      {dataless && <span className="muted row-icon" title="仅在 iCloud，打开时下载">{Icon.cloud}</span>}
+      {dataless && <span className="muted row-icon" title={t("side.cloudOnly")}>{Icon.cloud}</span>}
     </div>
   );
 }
@@ -284,6 +383,7 @@ function RenameInput({ path, initial }: { path: string; initial: string }) {
       className="rename"
       defaultValue={initial}
       onClick={(e) => e.stopPropagation()}
+      onDoubleClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
         e.stopPropagation();
         if (e.key === "Enter") commit();
@@ -297,73 +397,80 @@ function RenameInput({ path, initial }: { path: string; initial: string }) {
 // ── 标签栏 / 状态栏 ────────────────────────────────────
 
 function TabBar() {
+  const t = useT();
   const tabs = useShell((s) => s.tabs);
   const active = useShell((s) => s.active);
   const sidebar = useShell((s) => s.sidebar);
   return (
     <div className="tabbar" data-tauri-drag-region onDoubleClick={(e) => e.target === e.currentTarget && newDoc()}>
-      {!sidebar && <button className="icon show-sidebar" title="显示侧边栏（⌘\）" onClick={() => setSidebar(true)}>{Icon.sidebar}</button>}
-      {tabs.map((t) => (
+      {!sidebar && (
+        <>
+          <Logo text={false} />
+          <button className="icon show-sidebar" title={t("side.show")} onClick={() => setSidebar(true)}>{Icon.sidebar}</button>
+        </>
+      )}
+      {tabs.map((tab) => (
         <div
-          key={t.path}
-          className={`tab ${t.path === active ? "on" : ""} ${t.missing ? "missing" : ""}`}
-          onClick={() => activate(t.path)}
-          onAuxClick={(e) => e.button === 1 && closeTab(t.path)}
+          key={tab.path}
+          className={`tab ${tab.path === active ? "on" : ""} ${tab.missing ? "missing" : ""}`}
+          onClick={() => activate(tab.path)}
+          onAuxClick={(e) => e.button === 1 && closeTab(tab.path)}
           onContextMenu={(e) => {
             e.preventDefault();
             popup([
-              { text: "关闭", action: () => closeTab(t.path) },
-              { text: "关闭其他标签页", action: () => closeOthers(t.path), enabled: tabs.length > 1 },
+              { text: t("menu.close"), action: () => closeTab(tab.path) },
+              { text: t("menu.closeOthers"), action: () => closeOthers(tab.path), enabled: tabs.length > 1 },
               "-",
-              { text: "历史版本…", action: async () => { await activate(t.path); toggleHistory(true); } },
-              { text: "在 Finder 中显示", action: () => ipc.reveal(t.path), enabled: !t.missing },
-              { text: "拷贝路径", action: () => copyPath(t.path) },
+              { text: t("menu.history"), action: async () => { await activate(tab.path); toggleHistory(true); } },
+              { text: t("menu.reveal"), action: () => ipc.reveal(tab.path), enabled: !tab.missing },
+              { text: t("menu.copyPath"), action: () => copyPath(tab.path) },
             ]);
           }}
-          title={prettyPath(t.path)}
+          title={prettyPath(tab.path)}
         >
-          <span className="ellipsis">{t.title}</span>
+          <span className="ellipsis">{tab.title}</span>
           <span className="tab-end">
-            {t.save === "error" ? <span className="err-dot" /> : t.save !== "saved" ? <span className="dot" /> : null}
-            <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(t.path); }} title="关闭（⌘W）">{Icon.close}</button>
+            {tab.save === "error" ? <span className="err-dot" /> : tab.save !== "saved" ? <span className="dot" /> : null}
+            <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }} title={t("tab.close")}>{Icon.close}</button>
           </span>
         </div>
       ))}
-      <button className="icon new-tab" title="新建图（⌘N）" onClick={() => newDoc()}>{Icon.plus}</button>
+      <button className="icon new-tab" title={t("tab.new")} onClick={() => newDoc()}>{Icon.plus}</button>
     </div>
   );
 }
 
-const time = (t?: number) => (t ? new Date(t).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" }) : "");
+const time = (ts?: number) => (ts ? new Date(ts).toLocaleTimeString(getState().lang === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit" }) : "");
 
-function saveText(t: Tab) {
-  if (t.phase === "loading") return "正在打开…";
-  if (t.phase === "downloading") return "正在从 iCloud 下载…";
-  if (t.phase === "error") return "打不开";
-  if (t.missing) return "文件已不在原位置，自动保存已暂停";
-  switch (t.save) {
-    case "saved": return t.savedAt ? `已保存 ${time(t.savedAt)}` : "已打开";
-    case "dirty": return "有未保存的修改";
-    case "saving": return "保存中…";
-    case "error": return `保存失败：${t.saveError}`;
+function saveText(tab: Tab) {
+  if (tab.phase === "loading") return t("status.loading");
+  if (tab.phase === "downloading") return t("status.downloading");
+  if (tab.phase === "error") return t("status.error");
+  if (tab.missing) return t("status.missing");
+  switch (tab.save) {
+    case "saved": return tab.savedAt ? t("status.saved", { time: time(tab.savedAt) }) : t("status.opened");
+    case "dirty": return t("status.dirty");
+    case "saving": return t("status.saving");
+    case "error": return t("status.saveError", { error: tab.saveError ?? "" });
   }
 }
 
 function StatusBar() {
-  const tab = useShell((s) => s.tabs.find((t) => t.path === s.active));
+  const t = useT();
+  const tab = useShell((s) => s.tabs.find((x) => x.path === s.active));
   const sync = useShell((s) => (s.active ? s.sync[s.active] : undefined));
   if (!tab) return null;
   let syncText = "";
   if (sync?.ubiquitous) {
-    syncText = sync.conflict ? "iCloud 有冲突版本，正在合并" : sync.uploading ? "正在上传到 iCloud" : sync.uploaded ? "iCloud 已同步" : "等待上传到 iCloud";
+    syncText = sync.conflict ? t("sync.conflict") : sync.uploading ? t("sync.uploading") : sync.uploaded ? t("sync.uploaded") : t("sync.waiting");
   }
   return (
     <div className="statusbar">
       <span className={tab.save === "error" || tab.missing ? "err" : ""}>{saveText(tab)}</span>
       {syncText && <span>{syncText}</span>}
-      {tab.phase === "ready" && <span>{tab.elements} 个元素</span>}
+      {tab.phase === "ready" && <span>{t("status.elements", { n: tab.elements })}</span>}
       <span className="grow" />
-      <button className="link" onClick={() => toggleHistory()} title="历史版本（⌥⌘Y）">{Icon.history}<span>历史版本</span></button>
+      <button className="link" onClick={() => toggleHistory()} title="⌥⌘Y">{Icon.history}<span>{t("status.history")}</span></button>
       <span className="ellipsis path" title={tab.path}>{prettyPath(dirname(tab.path))}</span>
     </div>
   );
@@ -371,19 +478,43 @@ function StatusBar() {
 
 // ── 编辑区 ─────────────────────────────────────────────
 
-function EditorArea({ theme }: { theme: "light" | "dark" }) {
-  const tab = useShell((s) => s.tabs.find((t) => t.path === s.active));
+/** 打开超过 6 秒：提示可能在等 iCloud 下载，并给一个关闭按钮 */
+function Opening({ tab }: { tab: Tab }) {
+  const t = useT();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const left = 6000 - (Date.now() - (tab.openedAt ?? Date.now()));
+    const id = window.setTimeout(() => setSlow(true), Math.max(0, left));
+    return () => clearTimeout(id);
+  }, [tab.path]);
+  return (
+    <>
+      <div className="spinner" />
+      <div className="muted">{tab.phase === "downloading" ? t("status.downloading") : t("status.loading")}</div>
+      {slow && (
+        <>
+          <div className="muted small slow">{t("editor.slow")}</div>
+          <button onClick={() => closeTab(tab.path)}>{t("editor.closeTab")}</button>
+        </>
+      )}
+    </>
+  );
+}
+
+function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en" }) {
+  const t = useT();
+  const tab = useShell((s) => s.tabs.find((x) => x.path === s.active));
   if (!tab) return <Welcome />;
   const session = sessions.get(tab.path);
-  const dismiss = () => setState((s) => ({ tabs: s.tabs.map((t) => (t.path === tab.path ? { ...t, banner: undefined } : t)) }));
+  const dismiss = () => setState((s) => ({ tabs: s.tabs.map((x) => (x.path === tab.path ? { ...x, banner: undefined } : x)) }));
   return (
     <div className="editor">
       {tab.missing ? (
         <div className="banner warn">
-          <span>「{tab.title}」已在外部被删除或移走</span>
-          <button onClick={() => session?.restoreAtPath()}>存回原位置</button>
-          <button onClick={() => saveMissingAs(tab.path)}>另存为…</button>
-          <button onClick={() => closeTab(tab.path)}>关闭</button>
+          <span>{t("editor.missing", { title: tab.title })}</span>
+          <button onClick={() => session?.restoreAtPath()}>{t("editor.restoreAtPath")}</button>
+          <button onClick={() => saveMissingAs(tab.path)}>{t("editor.saveAs")}</button>
+          <button onClick={() => closeTab(tab.path)}>{t("app.close")}</button>
         </div>
       ) : tab.banner ? (
         <div className="banner">
@@ -392,20 +523,20 @@ function EditorArea({ theme }: { theme: "light" | "dark" }) {
         </div>
       ) : null}
       {tab.phase === "ready" && session ? (
-        <Editor session={session} theme={theme} />
+        <Editor session={session} theme={theme} lang={lang} />
       ) : (
         <div className="placeholder">
           {tab.phase === "error" ? (
             <>
-              <div>打不开「{tab.title}」</div>
+              <div>{t("editor.cantOpen", { title: tab.title })}</div>
               <div className="muted small selectable">{tab.error}</div>
               <div className="actions">
-                <button onClick={() => { closeTab(tab.path).then(() => openPath(tab.path)); }}>重试</button>
-                <button onClick={() => closeTab(tab.path)}>关闭</button>
+                <button onClick={() => { closeTab(tab.path).then(() => openPath(tab.path)); }}>{t("app.retry")}</button>
+                <button onClick={() => closeTab(tab.path)}>{t("app.close")}</button>
               </div>
             </>
           ) : (
-            <div className="muted">{tab.phase === "downloading" ? "正在从 iCloud 下载…" : "正在打开…"}</div>
+            <Opening tab={tab} />
           )}
         </div>
       )}
@@ -413,20 +544,20 @@ function EditorArea({ theme }: { theme: "light" | "dark" }) {
   );
 }
 
-const REASON: Record<string, string> = {
-  auto: "自动", before_external: "外部修改前", before_conflict: "合并冲突前", before_restore: "恢复前",
-};
-
 function when(ts: number) {
   const d = new Date(ts), now = new Date();
-  const hm = d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
-  if (d.toDateString() === now.toDateString()) return `今天 ${hm}`;
-  const y = new Date(now); y.setDate(now.getDate() - 1);
-  if (d.toDateString() === y.toDateString()) return `昨天 ${hm}`;
-  return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  const hm = d.toLocaleTimeString(getState().lang === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === now.toDateString()) return t("history.today", { hm });
+  const y = new Date(now);
+  y.setDate(now.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return t("history.yesterday", { hm });
+  return t("history.date", { m: d.getMonth() + 1, d: d.getDate(), hm });
 }
 
+const REASONS = new Set(["auto", "before_external", "before_conflict", "before_restore"]);
+
 function HistoryPanel() {
+  const t = useT();
   const open = useShell((s) => s.history);
   const active = useShell((s) => s.active);
   const [list, setList] = useState<HistoryEntry[] | null>(null);
@@ -437,25 +568,26 @@ function HistoryPanel() {
     }
   }, [open, active]);
   if (!open || !active) return null;
+  const reason = (r: string) => (REASONS.has(r) ? t(`reason.${r}` as Key) : r);
   return (
     <aside className="history">
       <div className="history-head">
-        <b>历史版本</b>
-        <button className="icon" onClick={() => toggleHistory(false)} title="关闭">{Icon.close}</button>
+        <b>{t("history.title")}</b>
+        <button className="icon" onClick={() => toggleHistory(false)} title={t("app.close")}>{Icon.close}</button>
       </div>
-      <p className="muted small">编辑时每 5 分钟留一份，合并外部修改、恢复之前也会先留一份。只存在这台 Mac 上。</p>
+      <p className="muted small">{t("history.desc")}</p>
       <div className="history-list">
-        {list === null && <div className="muted small">读取中…</div>}
-        {list?.length === 0 && <div className="muted small">还没有历史版本。编辑并保存后会自动生成。</div>}
+        {list === null && <div className="muted small">{t("side.loading")}</div>}
+        {list?.length === 0 && <div className="muted small">{t("history.empty")}</div>}
         {list?.map((e) => (
           <div key={e.id} className="history-item">
             <div className="grow">
               <div>{when(e.ts)}</div>
-              <div className="muted small">{REASON[e.reason] ?? e.reason} · {e.elements} 个元素</div>
+              <div className="muted small">{t("history.elements", { reason: reason(e.reason), n: e.elements })}</div>
             </div>
             <div className="history-actions">
-              <button onClick={() => restoreHistory(e.id)}>恢复</button>
-              <button onClick={() => historyAsCopy(e.id, e.ts)} title="另存为同目录下的新文件">副本</button>
+              <button onClick={() => restoreHistory(e.id)}>{t("history.restore")}</button>
+              <button onClick={() => historyAsCopy(e.id, e.ts)} title={t("history.copyHint")}>{t("history.copy")}</button>
             </div>
           </div>
         ))}
@@ -465,25 +597,26 @@ function HistoryPanel() {
 }
 
 function Welcome() {
+  const t = useT();
   const roots = useShell((s) => s.roots);
   const recent = useShell((s) => s.recent).slice(0, 8);
   if (!roots.length) {
     return (
       <div className="welcome">
         <img src="/icon.png" alt="" className="welcome-logo" />
-        <h1>图存在哪</h1>
-        <p className="muted">文件就是标准 .excalidraw，excalidraw.com、Obsidian 插件都能直接打开。</p>
+        <h1>{t("welcome.where")}</h1>
+        <p className="muted">{t("welcome.desc")}</p>
         <div className="cards">
           <button className="card primary" onClick={useICloudRoot}>
             <b>{Icon.cloud} iCloud Drive</b>
-            <span className="muted">在 iCloud Drive 里建一个「Excalidraw」文件夹，在你的 Mac 之间自动同步。</span>
+            <span className="muted">{t("welcome.icloudDesc")}</span>
           </button>
           <button className="card" onClick={pickRoot}>
-            <b>{Icon.folder} 本地文件夹</b>
-            <span className="muted">选任意文件夹，适合放进 git 仓库或其他同步盘。</span>
+            <b>{Icon.folder} {t("welcome.local")}</b>
+            <span className="muted">{t("welcome.localDesc")}</span>
           </button>
         </div>
-        <p className="muted small">之后还可以在侧边栏添加更多文件夹。</p>
+        <p className="muted small">{t("welcome.later")}</p>
       </div>
     );
   }
@@ -491,12 +624,12 @@ function Welcome() {
     <div className="welcome">
       <img src="/icon.png" alt="" className="welcome-logo small-logo" />
       <div className="actions">
-        <button onClick={() => newDoc()}>新建图 <kbd>⌘N</kbd></button>
-        <button onClick={openFileDialog}>打开… <kbd>⌘O</kbd></button>
+        <button onClick={() => newDoc()}>{t("welcome.new")} <kbd>⌘N</kbd></button>
+        <button onClick={openFileDialog}>{t("welcome.open")} <kbd>⌘O</kbd></button>
       </div>
       {recent.length > 0 && (
         <div className="recent">
-          <div className="sec">最近打开</div>
+          <div className="sec">{t("welcome.recent")}</div>
           {recent.map((p) => (
             <div key={p} className="row file" onClick={() => openPath(p)}>
               <span className="row-icon">{Icon.file}</span>
@@ -506,6 +639,51 @@ function Welcome() {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── 设置 ───────────────────────────────────────────────
+
+function Segmented<T extends string>({ value, options, onChange }: { value: T; options: [T, string][]; onChange: (v: T) => void }) {
+  return (
+    <div className="segmented" role="radiogroup">
+      {options.map(([v, label]) => (
+        <button key={v} role="radio" aria-checked={value === v} className={value === v ? "on" : ""} onClick={() => onChange(v)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+function SettingsDialog() {
+  const t = useT();
+  const open = useShell((s) => s.settingsOpen);
+  const s = useShell((x) => x.settings);
+  if (!open) return null;
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && setState({ settingsOpen: false })}>
+      <div className="modal" role="dialog" aria-label={t("settings.title")}>
+        <div className="modal-head">
+          <b>{t("settings.title")}</b>
+          <button className="icon" onClick={() => setState({ settingsOpen: false })} title={t("app.close")}>{Icon.close}</button>
+        </div>
+        <div className="setting">
+          <span>{t("settings.appearance")}</span>
+          <Segmented value={s.theme} onChange={(theme) => updateSettings({ theme })} options={[["system", t("settings.system")], ["light", t("settings.light")], ["dark", t("settings.dark")]]} />
+        </div>
+        <div className="setting">
+          <span>{t("settings.language")}</span>
+          <Segmented value={s.lang} onChange={(lang) => updateSettings({ lang })} options={[["system", t("settings.system")], ["zh", t("settings.zh")], ["en", t("settings.en")]]} />
+        </div>
+        <div className="setting">
+          <span>{t("settings.sort")}</span>
+          <select value={s.sort} onChange={(e) => updateSettings({ sort: e.target.value as Settings["sort"] })}>
+            <option value="mtime">{t("sort.mtime")}</option>
+            <option value="ctime">{t("sort.ctime")}</option>
+            <option value="name">{t("sort.name")}</option>
+          </select>
+        </div>
+      </div>
     </div>
   );
 }

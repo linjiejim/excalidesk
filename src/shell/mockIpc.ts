@@ -19,7 +19,8 @@ function tree(root: string): TreeNode[] {
       const isFile = i === parts.length - 1;
       let n = level.find((x) => x.path === base);
       if (!n) {
-        n = { name: isFile ? part.replace(/\.excalidraw$/, "") : part, path: base, dir: !isFile, children: isFile ? undefined : [], mtime: 0, dataless: p.endsWith("数据流.excalidraw") };
+        const mtime = Date.now() - (p.length % 7) * 3600e3;
+        n = { name: isFile ? part.replace(/\.excalidraw$/, "") : part, path: base, dir: !isFile, children: isFile ? undefined : [], mtime, ctime: mtime - 86400e3, dataless: p.endsWith("数据流.excalidraw") };
         level.push(n);
       }
       level = n.children ?? [];
@@ -34,6 +35,9 @@ const ok = <T>(v: T) => Promise.resolve(v);
 export const mockIpc = {
   state: () => ok(state),
   pickWorkspace: () => ok(null),
+  reorderRoots: (roots: string[]) => { state.roots = roots; return ok(undefined); },
+  recentRemove: (p: string) => { state.recent = state.recent.filter((r) => r !== p); return ok(undefined); },
+  setMenuLang: () => ok(undefined),
   addWorkspace: () => ok(undefined),
   removeWorkspace: () => ok(undefined),
   icloudDefaultDir: () => ok(ROOT),

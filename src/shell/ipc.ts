@@ -4,7 +4,7 @@ import { mockIpc } from "./mockIpc";
 
 export type Viewport = { scrollX: number; scrollY: number; zoom: number };
 export type Persisted = { roots: string[]; recent: string[]; viewports: Record<string, Viewport> };
-export type TreeNode = { name: string; path: string; dir: boolean; children?: TreeNode[]; mtime: number; dataless: boolean };
+export type TreeNode = { name: string; path: string; dir: boolean; children?: TreeNode[]; mtime: number; ctime: number; dataless: boolean };
 export type SyncStatus = { ubiquitous: boolean; dataless: boolean; downloaded: boolean; uploaded: boolean; uploading: boolean; downloading: boolean; conflict: boolean };
 export type SaveResult = { bytes: number; elements: number; ms: number };
 export type DiskStatus = "same" | "changed" | "missing";
@@ -15,7 +15,10 @@ const pathHeader = (path: string) => ({ headers: { path: encodeURIComponent(path
 
 const realIpc = {
   state: () => invoke<Persisted>("state_get"),
-  pickWorkspace: () => invoke<string | null>("workspace_pick"),
+  pickWorkspace: (title: string) => invoke<string | null>("workspace_pick", { title }),
+  reorderRoots: (roots: string[]) => invoke<void>("workspace_reorder", { roots }),
+  recentRemove: (path: string) => invoke<void>("recent_remove", { path }),
+  setMenuLang: (lang: string) => invoke<void>("set_menu_lang", { lang }),
   addWorkspace: (path: string) => invoke<void>("workspace_add", { path }),
   removeWorkspace: (path: string) => invoke<void>("workspace_remove", { path }),
   icloudDefaultDir: () => invoke<string>("icloud_default_dir"),
@@ -42,11 +45,11 @@ const realIpc = {
   conflictRead: async (versionPath: string) => new TextDecoder().decode(await invoke<ArrayBuffer>("conflict_read", { versionPath })),
   conflictsResolve: (path: string) => invoke<void>("conflicts_resolve", { path }),
   rename: (from: string, name: string) => invoke<string>("path_rename", { from, name }),
-  duplicate: (path: string) => invoke<string>("path_duplicate", { path }),
+  duplicate: (path: string, suffix: string) => invoke<string>("path_duplicate", { path, suffix }),
   trash: (path: string) => invoke<string>("path_trash", { path }),
   mkdir: (parent: string, name?: string) => invoke<string>("dir_create", { parent, name }),
   copyText: (text: string) => invoke<void>("copy_text", { text }),
-  confirm: (title: string, message: string, ok: string) => invoke<boolean>("confirm", { title, message, ok }),
+  confirm: (title: string, message: string, ok: string, cancel: string) => invoke<boolean>("confirm", { title, message, ok, cancel }),
   // 自测辅助
   selftestDir: () => invoke<string>("selftest_dir"),
   debugRead: (path: string) => invoke<string>("debug_read", { path }),

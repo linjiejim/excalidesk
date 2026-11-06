@@ -54,7 +54,7 @@ impl Doc {
         if bytes.iter().all(|b| b.is_ascii_whitespace()) {
             return Ok(Doc::default());
         }
-        let v: Value = serde_json::from_slice(bytes).map_err(|e| format!("不是有效的 .excalidraw 文件：{e}"))?;
+        let v: Value = serde_json::from_slice(bytes).map_err(|e| format!("err.invalid_file:{e}"))?;
         let mut d = Doc::default();
         if let Some(els) = v.get("elements").and_then(Value::as_array) {
             for e in els {
@@ -161,7 +161,7 @@ pub fn write_file(p: &Path, bytes: &[u8]) -> Result<(), String> {
 pub fn save(store: &DocStore, path: &Path, delta: Delta, history_root: &Path) -> Result<SaveResult, String> {
     let t = Instant::now();
     let mut map = store.0.lock().unwrap();
-    let doc = map.get_mut(path).ok_or("文档没有打开")?;
+    let doc = map.get_mut(path).ok_or("err.not_open")?;
     doc.apply(delta);
     let bytes = doc.serialize();
     write_file(path, &bytes)?;

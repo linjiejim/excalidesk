@@ -281,7 +281,7 @@ mod mac {
         let mut err: *mut NSError = std::ptr::null_mut();
         let ok: Bool = unsafe { msg_send![&*fm, trashItemAtURL: &*u, resultingItemURL: &mut out, error: &mut err] };
         if !ok.as_bool() {
-            return Err(err_text(err).unwrap_or_else(|| "移到废纸篓失败".into()));
+            return Err(err_text(err).unwrap_or_else(|| "err.trash_failed".into()));
         }
         Ok(if out.is_null() { String::new() } else { unsafe { (*out).path().map(|s| s.to_string()).unwrap_or_default() } })
     }

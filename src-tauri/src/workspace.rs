@@ -72,19 +72,20 @@ pub struct Node {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<Node>,
     pub mtime: u64,
+    /// 创建时间（毫秒），侧边栏按创建时间排序用
+    pub ctime: u64,
     /// iCloud 里还没下载到本机
     pub dataless: bool,
 }
 
 pub const EXT: &str = ".excalidraw";
 
-fn mtime_ms(p: &Path) -> u64 {
-    std::fs::metadata(p)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+fn times_ms(p: &Path) -> (u64, u64) {
+    let ms = |t: std::io::Result<std::time::SystemTime>| t.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).map(|d| d.as_millis() as u64).unwrap_or(0);
+    match std::fs::metadata(p) {
+        Ok(m) => (ms(m.modified()), ms(m.created())),
+        Err(_) => (0, 0),
+    }
 }
 
 /// 只收 .excalidraw 和包含它们的文件夹；兼容老系统的 `.名字.icloud` 占位文件
@@ -105,16 +106,20 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<Node> {
                 .map(|it| it.flatten().all(|e| e.file_name().to_string_lossy().starts_with('.')))
                 .unwrap_or(false);
             if !children.is_empty() || empty {
-                out.push(Node { name, path: path.display().to_string(), dir: true, children, mtime: 0, dataless: false });
+                let (mtime, ctime) = times_ms(&path);
+                out.push(Node { name, path: path.display().to_string(), dir: true, children, mtime, ctime, dataless: false });
             }
         } else if let Some(real) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".icloud")).filter(|n| n.ends_with(EXT)) {
             let real_path = path.with_file_name(real);
-            out.push(Node { name: real.trim_end_matches(EXT).into(), path: real_path.display().to_string(), dir: false, children: vec![], mtime: 0, dataless: true });
+            let (mtime, ctime) = times_ms(&path);
+            out.push(Node { name: real.trim_end_matches(EXT).into(), path: real_path.display().to_string(), dir: false, children: vec![], mtime, ctime, dataless: true });
         } else if name.ends_with(EXT) && !name.starts_with('.') {
+            let (mtime, ctime) = times_ms(&path);
             out.push(Node {
                 name: name.trim_end_matches(EXT).into(),
                 dataless: crate::icloud::is_dataless(&path),
-                mtime: mtime_ms(&path),
+                mtime,
+                ctime,
                 path: path.display().to_string(),
                 dir: false,
                 children: vec![],

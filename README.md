@@ -8,7 +8,9 @@
 - **增量保存**：编辑时只把变了的元素交给 Rust，大图保存不卡主线程
 - **本地历史版本**：自动留档，合并前先备份，一键恢复或另存为副本
 - **边界情况都兜住**：iCloud 冲突版本自动合并；文件在外部被删除或移走时暂停保存，不会把它写回来
-- 标签页、侧边栏右键菜单与行内重命名、原生菜单、双击打开、PNG / SVG 导出、深浅色跟随系统
+- 中英双语、浅色 / 深色 / 跟随系统（设置 ⌘,）
+- 侧边栏：右键菜单、双击改名、拖动调整工作区顺序、按修改时间 / 创建时间 / 名称排序
+- 标签页、原生菜单、双击打开、PNG / SVG 导出
 
 > 状态：早期版本，目前只支持 macOS 13+。
 
@@ -37,7 +39,7 @@ docs/             方案、P0 性能实验结果、各阶段说明
 
 ## 设计要点
 
-详见 [docs/plan.md](docs/plan.md)、[docs/p0-results.md](docs/p0-results.md)、[docs/p1-notes.md](docs/p1-notes.md)、[docs/p2-notes.md](docs/p2-notes.md)。
+详见 [docs/plan.md](docs/plan.md)、[docs/p0-results.md](docs/p0-results.md)、[docs/p1-notes.md](docs/p1-notes.md)、[docs/p2-notes.md](docs/p2-notes.md)、[docs/v0.3-notes.md](docs/v0.3-notes.md)。
 
 - Excalidraw 用官方 npm 包（锁定 0.18.1），不 fork。
 - Web 层只管画，Rust 层掌管文件：读写走 `NSFileCoordinator`，写入是临时文件 + rename 的原子写。

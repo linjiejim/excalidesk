@@ -1,9 +1,11 @@
 // 端到端自测（--selftest）：在临时工作区里把主路径和边界情况都走一遍，结果写到结果目录后退出。
 // 移到废纸篓和 iCloud 冲突不在这里测：前者会动到真实的废纸篓，后者需要两台设备。
 import { CaptureUpdateAction, convertToExcalidrawElements } from "@excalidraw/excalidraw";
-import { activate, addRoot, closeTab, duplicatePath, exportActive, newDoc, newFolder, openPath, renamePath, sessions } from "./actions";
+import { activate, addRoot, closeTab, duplicatePath, exportActive, moveRoot, newDoc, newFolder, openPath, removeRoot, renamePath, sessions } from "./actions";
+import { t } from "./i18n";
+import { sortTree } from "./Shell";
 import { ipc } from "./ipc";
-import { getState, setState } from "./store";
+import { getState, setState, updateSettings } from "./store";
 
 type Step = { name: string; ok: boolean; ms: number; detail?: unknown };
 
@@ -176,7 +178,7 @@ export async function runSelftest() {
 
   await step("创建副本", async () => {
     await duplicatePath(small);
-    const copy = `${dir}/子文件夹/改过名的小图 副本.excalidraw`;
+    const copy = `${dir}/子文件夹/改过名的小图 ${t("app.copySuffix")}.excalidraw`;
     await waitFor(() => exists(copy), 3000);
     if (!fileIds(await ipc.debugRead(copy)).includes("after-rename")) throw new Error("副本内容不对");
     return copy.split("/").pop();
@@ -186,8 +188,8 @@ export async function runSelftest() {
     await newFolder(dir);
     const folder = getState().renaming!;
     setState({ renaming: null });
-    if (!folder?.endsWith("新建文件夹")) throw new Error(`文件夹 ${folder}`);
-    await waitFor(() => treeText(dir).includes("新建文件夹"), 3000);
+    if (!folder?.endsWith(t("app.newFolder"))) throw new Error(`文件夹 ${folder}`);
+    await waitFor(() => treeText(dir).includes(t("app.newFolder")), 3000);
     await newDoc(folder);
     const p = getState().active!;
     await waitFor(() => ready(p));
@@ -213,7 +215,7 @@ export async function runSelftest() {
   });
 
   await step("文件在外部被删除：暂停保存、不复活，可存回原位置", async () => {
-    const copy = `${dir}/子文件夹/改过名的小图 副本.excalidraw`;
+    const copy = `${dir}/子文件夹/改过名的小图 ${t("app.copySuffix")}.excalidraw`;
     await openPath(copy);
     await waitFor(() => ready(copy));
     await ipc.debugRemove(copy);
@@ -247,6 +249,49 @@ export async function runSelftest() {
     return { tabs: getState().tabs.length };
   });
 
+  await step("拖动调整工作区顺序（持久化）", async () => {
+    const parent = dir.slice(0, dir.lastIndexOf("/"));
+    const second = await ipc.mkdir(parent, `${dir.split("/").pop()}-second`);
+    await addRoot(second);
+    await moveRoot(second, dir, false);
+    const roots = (await ipc.state()).roots;
+    const ok = roots.indexOf(second) === roots.indexOf(dir) - 1;
+    await removeRoot(second);
+    if (!ok) throw new Error(JSON.stringify(roots.map((r) => r.split("/").pop())));
+    return "ok";
+  });
+
+  await step("侧边栏排序：最新修改在上、文件夹在前、名称排序", async () => {
+    const f = (name: string, mtime: number, ctime = 0) => ({ name, path: name, dir: false, mtime, ctime, dataless: false });
+    const nodes = [f("b", 1), f("a", 3), { name: "d", path: "d", dir: true, mtime: 0, ctime: 0, dataless: false, children: [f("x", 2)] }];
+    const byTime = sortTree(nodes, "mtime", "zh").map((n) => n.name).join();
+    const byName = sortTree(nodes, "name", "zh").map((n) => n.name).join();
+    if (byTime !== "d,a,b" || byName !== "d,a,b".split(",").sort((a, b) => (a === "d" ? -1 : b === "d" ? 1 : a.localeCompare(b))).join()) throw new Error(`${byTime} / ${byName}`);
+    return { byTime, byName };
+  });
+
+  await step("中英切换", async () => {
+    updateSettings({ lang: "en" });
+    const en = t("status.opened");
+    updateSettings({ lang: "zh" });
+    const zh = t("status.opened");
+    updateSettings({ lang: "system" });
+    if (en !== "Opened" || zh !== "已打开") throw new Error(`${en} / ${zh}`);
+    return { en, zh };
+  });
+
+  await step("最近打开里不存在的文件会被清掉", async () => {
+    const gone = `${dir}/会被删掉.excalidraw`;
+    await write(gone, { type: "excalidraw", version: 2, elements: [], appState: {}, files: {} });
+    await openPath(gone);
+    await waitFor(() => ready(gone));
+    await closeTab(gone);
+    await ipc.debugRemove(gone);
+    const recent = (await ipc.state()).recent;
+    if (recent.includes(gone)) throw new Error("还在最近打开里");
+    return "ok";
+  });
+
   await step("保存出的文件是合法的 .excalidraw", async () => {
     const d = JSON.parse(await ipc.debugRead(small));
     const bad = (d.elements as any[]).filter((e) => !e.id || !e.type || typeof e.version !== "number" || !e.index);
@@ -256,6 +301,6 @@ export async function runSelftest() {
     return { elements: d.elements.length };
   });
 
-  const out = { env: "selftest", at: new Date().toISOString(), passed: steps.filter((s) => s.ok).length, total: steps.length, steps };
+  const out = { env: "selftest", at: new Date().toISOString(), navigatorLanguage: navigator.language, passed: steps.filter((s) => s.ok).length, total: steps.length, steps };
   await ipc.benchResult(JSON.stringify(out, null, 2));
 }

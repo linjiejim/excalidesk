@@ -5,6 +5,7 @@
 //   变了 → 防抖 800ms、最长 5s → 只发 (version, versionNonce) 变了的元素 + 新图片 → Rust 维护整张图并写盘
 //   会话里的第一次保存发全量，保证 Rust 模型和前端（restore 修复过的）元素完全一致。
 import { CaptureUpdateAction, getSceneVersion, reconcileElements, restoreAppState, restoreElements } from "@excalidraw/excalidraw";
+import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
 
@@ -267,16 +268,16 @@ export class DocSession {
     // 先更新基线版本号，updateScene 触发的 onChange 才不会被当成新改动
     this.lastVersion = getSceneVersion(next as any);
     this.apply(next, remote.files, wasDirty);
-    const label = changed ? `外部修改了 ${changed} 个元素` : "文件在外部被修改";
+    const label = changed ? t("banner.externalN", { n: changed }) : t("banner.external");
     if (wasDirty) {
-      updateTab(this.path, { banner: `${label}，已和你未保存的修改按元素合并（⌘Z 可撤销）`, elements: this.liveCount() });
+      updateTab(this.path, { banner: t("banner.merged", { label }), elements: this.liveCount() });
       this.dirty = false;
       this.markDirty();
       await this.flush();
       return "merged";
     }
     this.dirty = false;
-    updateTab(this.path, { banner: `${label}，已载入最新版本`, save: "saved", elements: this.liveCount() });
+    updateTab(this.path, { banner: t("banner.replaced", { label }), save: "saved", elements: this.liveCount() });
     return "replaced";
   }
 
@@ -317,8 +318,9 @@ export class DocSession {
     this.markDirty();
     await this.flush();
     await ipc.conflictsResolve(this.path);
-    const devices = [...new Set(versions.map((v) => v.device).filter(Boolean))].join("、");
-    updateTab(this.path, { banner: `已合并 ${versions.length} 个来自${devices ? `「${devices}」` : "其他设备"}的冲突版本（⌘Z 可撤销）`, elements: this.liveCount() });
+    const devices = [...new Set(versions.map((v) => v.device).filter(Boolean))].join(", ");
+    const from = devices ? t("banner.device", { d: devices }) : t("banner.otherDevices");
+    updateTab(this.path, { banner: t("banner.conflicts", { n: versions.length, from }), elements: this.liveCount() });
     return versions.length;
   }
 
@@ -341,7 +343,7 @@ export class DocSession {
     this.settleUntil = 0;
     this.markDirty();
     await this.flush();
-    updateTab(this.path, { banner: "已恢复到所选历史版本（⌘Z 可撤销）", elements: this.liveCount() });
+    updateTab(this.path, { banner: t("banner.restored"), elements: this.liveCount() });
   }
 
   isDirty() {

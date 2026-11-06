@@ -14,6 +14,10 @@
 
 > 状态：早期版本，目前只支持 macOS 13+。
 
+## 更新
+
+装好之后 Excalidesk 会从 GitHub Releases 自己更新：启动时和之后每隔几小时查一次最新 release，在后台下载，用 App 里内置的公钥验签，装好后提示重启（重启前先把打开的图存完）。在 设置 → 自动更新 里关掉，或用 Excalidesk → 检查更新… 立即检查。0.3.0 及更早的版本还没有这个功能，需要手动下载一次新版本。
+
 ## 开发
 
 需要 Node 20+、Rust（stable）、Xcode Command Line Tools。
@@ -26,6 +30,14 @@ npm run selftest         # 构建并在真 App 里跑端到端自测
 npm run release          # 打发布包（不带测试场景）→ release/Excalidesk_<版本>_<架构>.dmg
 npm run dev              # 只在浏览器里看界面（用假数据，不需要 Tauri）
 ```
+
+### 发布
+
+推一个 `v0.4.0` 这样的 tag：Release 工作流先建草稿 release，再分别构建 Apple 芯片和 Intel 两个架构上传进去，连同签好名的更新包和更新器读的 `latest.json`。草稿要手动发布：已安装的 App 只读最新一个**已发布** release 里的 `latest.json`，发布了才算推送更新。工作流会先核对 tag 和 `tauri.conf.json` 里的版本号一致，写 `latest.json` 之前再用公钥验一遍两个更新包。
+
+更新包的签名需要仓库 secret `TAURI_SIGNING_PRIVATE_KEY`：本机 `~/.tauri/excalidesk/updater.key` 的内容（没有密码），公钥是 `tauri.conf.json` 里的 `plugins.updater.pubkey`。私钥要备份好：已安装的 App 只接受这把钥匙签的更新，换钥匙就得换 `pubkey`，所有人再手动下载一次。Apple 签名和公证可选，secret 名同 Retrace（`APPLE_CERTIFICATE` 等）。
+
+`npm run release` 仍然可以在本机打 dmg，但不生成更新包，不会推给已安装的 App。
 
 ## 目录
 

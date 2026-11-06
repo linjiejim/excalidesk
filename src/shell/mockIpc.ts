@@ -57,6 +57,7 @@ export const mockIpc = {
   pickSavePath: () => ok(null),
   writeBytes: (p: string, b: Uint8Array) => { files.set(p, decode(b)); return ok(undefined); },
   closeNow: () => ok(undefined),
+  restartNow: () => ok(undefined),
   historyList: () => ok([{ id: "1", ts: Date.now() - 3600e3, reason: "auto", elements: 3048, bytes: 1 }, { id: "2", ts: Date.now() - 86400e3, reason: "before_external", elements: 3000, bytes: 1 }]),
   historyRead: () => fetch("/scenes/large.excalidraw").then((r) => r.text()),
   historySnapshot: () => ok(null),

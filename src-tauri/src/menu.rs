@@ -15,6 +15,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, lang: &str) -> tauri::Result<Menu<R
 
     let app_menu = Submenu::with_items(app, "Excalidesk", true, &[
         &PredefinedMenuItem::about(app, Some(l("关于 Excalidesk", "About Excalidesk")), None)?,
+        &item("check_updates", l("检查更新…", "Check for Updates…"), None)?,
         &sep()?,
         &item("settings", l("设置…", "Settings…"), Some("CmdOrCtrl+Comma"))?,
         &sep()?,

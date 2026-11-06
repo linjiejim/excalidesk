@@ -38,6 +38,7 @@ const realIpc = {
   pickSavePath: (name: string, ext: string) => invoke<string | null>("pick_save_path", { name, ext }),
   writeBytes: (path: string, body: Uint8Array) => invoke<void>("write_bytes", body, pathHeader(path)),
   closeNow: () => invoke<void>("close_now"),
+  restartNow: () => invoke<void>("restart_now"),
   historyList: (path: string) => invoke<HistoryEntry[]>("history_list", { path }),
   historyRead: async (path: string, id: string) => new TextDecoder().decode(await invoke<ArrayBuffer>("history_read", { path, id })),
   historySnapshot: (path: string, reason: string) => invoke<HistoryEntry | null>("history_snapshot", { path, reason }),

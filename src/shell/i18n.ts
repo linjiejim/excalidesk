@@ -38,11 +38,17 @@ const zh = {
   // 设置
   "settings.title": "设置", "settings.appearance": "外观", "settings.language": "语言", "settings.sort": "侧边栏排序",
   "settings.system": "跟随系统", "settings.light": "浅色", "settings.dark": "深色", "settings.zh": "简体中文", "settings.en": "English",
+  "settings.autoUpdate": "自动更新", "settings.autoUpdateDesc": "启动时和之后每隔几小时到 GitHub 查看新版本，装好后提示你重启。",
+  "settings.version": "Excalidesk {version}", "settings.checkNow": "立即检查", "settings.checking": "检查中…",
+  // 更新
+  "update.downloading": "正在下载 Excalidesk {version}…", "update.ready": "Excalidesk {version} 已装好，重启后生效。", "update.restart": "重启",
+  "update.latest": "Excalidesk {version} 已是最新版本", "update.failed": "没能更新 Excalidesk：{reason}", "update.installedOnly": "只有安装好的 App 才能更新",
   // 提示 / 对话框
   "toast.onlyExcalidraw": "只能打开 .excalidraw 文件", "toast.addFolderFirst": "先添加一个文件夹，新图会放在那里", "toast.mkdirFailed": "新建文件夹失败：{error}",
   "toast.created": "已创建「{name}」", "toast.duplicateFailed": "创建副本失败：{error}", "toast.trashed": "「{name}」已移到废纸篓", "toast.trashFailed": "移到废纸篓失败：{error}",
   "toast.pathCopied": "路径已拷贝", "toast.exported": "已导出 {name}", "toast.conflictFailed": "合并 iCloud 冲突版本失败：{error}", "toast.externalFailed": "读取外部修改失败：{error}",
   "toast.unsaved": "{n} 个文件没保存成功（{names}），再关一次会直接退出",
+  "toast.unsavedRestart": "{n} 个文件没保存成功（{names}），再点一次「重启」会直接重启",
   "dialog.pickFolder": "选择一个放图的文件夹", "dialog.trashTitle": "移到废纸篓", "dialog.trashFolder": "把文件夹「{name}」和里面的所有内容移到废纸篓？",
   // 会话横幅
   "banner.externalN": "外部修改了 {n} 个元素", "banner.external": "文件在外部被修改", "banner.merged": "{label}，已和你未保存的修改按元素合并（⌘Z 可撤销）",
@@ -79,10 +85,15 @@ const en: typeof zh = {
   "welcome.new": "New Drawing", "welcome.open": "Open…", "welcome.recent": "Recent",
   "settings.title": "Settings", "settings.appearance": "Appearance", "settings.language": "Language", "settings.sort": "Sidebar order",
   "settings.system": "System", "settings.light": "Light", "settings.dark": "Dark", "settings.zh": "简体中文", "settings.en": "English",
+  "settings.autoUpdate": "Update automatically", "settings.autoUpdateDesc": "Looks for a new release on GitHub at launch and every few hours, installs it and asks you to restart.",
+  "settings.version": "Excalidesk {version}", "settings.checkNow": "Check Now", "settings.checking": "Checking…",
+  "update.downloading": "Downloading Excalidesk {version}…", "update.ready": "Excalidesk {version} is installed. Restart to use it.", "update.restart": "Restart",
+  "update.latest": "Excalidesk {version} is the latest version", "update.failed": "Couldn't update Excalidesk: {reason}", "update.installedOnly": "Updates work in the installed app only",
   "toast.onlyExcalidraw": "Only .excalidraw files can be opened", "toast.addFolderFirst": "Add a folder first — new drawings go there", "toast.mkdirFailed": "Couldn't create folder: {error}",
   "toast.created": "Created “{name}”", "toast.duplicateFailed": "Couldn't duplicate: {error}", "toast.trashed": "Moved “{name}” to Trash", "toast.trashFailed": "Couldn't move to Trash: {error}",
   "toast.pathCopied": "Path copied", "toast.exported": "Exported {name}", "toast.conflictFailed": "Couldn't merge iCloud conflict: {error}", "toast.externalFailed": "Couldn't read outside change: {error}",
   "toast.unsaved": "{n} file(s) didn't save ({names}). Close again to quit anyway.",
+  "toast.unsavedRestart": "{n} file(s) didn't save ({names}). Click Restart again to restart anyway.",
   "dialog.pickFolder": "Choose a folder for your drawings", "dialog.trashTitle": "Move to Trash", "dialog.trashFolder": "Move the folder “{name}” and everything in it to the Trash?",
   "banner.externalN": "{n} elements changed outside the app", "banner.external": "File changed outside the app", "banner.merged": "{label} — merged with your unsaved edits (⌘Z to undo)",
   "banner.replaced": "{label} — loaded the latest version", "banner.conflicts": "Merged {n} conflicting version(s) from {from} (⌘Z to undo)", "banner.otherDevices": "other devices", "banner.device": "“{d}”",

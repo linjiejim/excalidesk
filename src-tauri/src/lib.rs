@@ -496,6 +496,14 @@ fn close_now(app: AppHandle) {
     app.exit(0);
 }
 
+/// 装好更新后重启：和 close_now 一样，前端先把文档存完再调。
+/// 不用 plugin-process 的 relaunch：它要么绕过退出前的保存，要么被 ExitRequested 拦下后卡住。
+#[tauri::command]
+fn restart_now(app: AppHandle) {
+    ALLOW_EXIT.store(true, Ordering::SeqCst);
+    app.request_restart();
+}
+
 // ── P0 基准 / 自测辅助 ─────────────────────────────────
 
 #[tauri::command]
@@ -585,6 +593,7 @@ pub fn run() {
     let o = parse_opts();
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(o.clone())
         .manage(DocStore::default())
         .manage(Watch(Mutex::new(None)))
@@ -596,7 +605,7 @@ pub fn run() {
             history_list, history_read, history_snapshot, conflicts_list, conflict_read, conflicts_resolve,
             path_rename, path_duplicate, path_trash, dir_create, copy_text, confirm, debug_remove,
             recent_remove, workspace_reorder, set_menu_lang,
-            pick_open_file, pick_save_path, write_bytes, close_now,
+            pick_open_file, pick_save_path, write_bytes, close_now, restart_now,
             bench_result, save_doc, opts, icloud::icloud_probe, selftest_dir, debug_read, debug_size, external_edit,
         ])
         .setup(move |app| {

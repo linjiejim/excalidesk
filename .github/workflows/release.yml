@@ -1,0 +1,140 @@
+name: Release
+
+# Push a tag like v0.4.0: one job opens a draft release, then each architecture builds and uploads
+# into it (two builds creating the release at once would race), then `latest.json` is written for
+# the updater. Publish the draft by hand: installed copies only see the latest published release,
+# so publishing is what ships the update.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  draft:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+      # The bundles are signed for tauri.conf.json's version and the updater announces the tag's:
+      # installed copies refuse an update whose two versions differ, so stop before building one.
+      - name: Tag matches the app version
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(jq -r .version src-tauri/tauri.conf.json)
+          [ "$version" = "${TAG#v}" ] || { echo "::error::Tag $TAG, but tauri.conf.json says $version"; exit 1; }
+      - id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --draft --verify-tag --title "Excalidesk $TAG" --notes "Excalidesk $TAG"
+          # A new draft can take a moment to show up; never hand the builds an empty id
+          # (tauri-action would build and silently upload nothing).
+          for attempt in 1 2 3 4 5 6; do
+            id=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json databaseId --jq .databaseId 2>/dev/null || true)
+            [ -n "$id" ] && break
+            sleep 5
+          done
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [aarch64-apple-darwin, x86_64-apple-darwin]
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+      - run: npm ci
+      # Signing and notarisation are optional: without these secrets the app is unsigned and macOS
+      # asks to confirm the first launch. Only secrets that are set are passed on, because an empty
+      # APPLE_CERTIFICATE would make the bundler try to import a certificate and fail.
+      - name: Signing secrets, when configured
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            value="${!name}"
+            if [ -n "$value" ]; then
+              { echo "$name<<__END__"; echo "$value"; echo "__END__"; } >> "$GITHUB_ENV"
+            fi
+          done
+      # tauri.release.conf.json turns on the updater bundle (`.app.tar.gz` + `.sig`), signed with
+      # the key whose public half is in tauri.conf.json; installed copies refuse anything else.
+      # The key has no password. Without the secret the build fails rather than ship unsigned.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+          # Leave out the bench / self-test scenes, as scripts/release.sh does.
+          EXCALIDESK_RELEASE: "1"
+        with:
+          releaseId: ${{ needs.draft.outputs.id }}
+          tauriScript: npx tauri
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.release.conf.json
+          # Written once by the `updater` job: two builds editing one latest.json could drop a platform.
+          includeUpdaterJson: false
+
+  # The updater's manifest, from both builds' signatures. Skipped when either build failed, so a
+  # release never offers an update for only one architecture.
+  updater:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq minisign
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG#v}"
+          dir=$(mktemp -d)
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.app.tar.gz' --pattern '*.app.tar.gz.sig' --dir "$dir"
+          # Check each bundle the way installed copies will: against the public key in tauri.conf.json
+          # (a secret that doesn't match it only warns at build time) and signed for this version.
+          jq -r .plugins.updater.pubkey src-tauri/tauri.conf.json | base64 -d > "$dir/key.pub"
+          for arch in aarch64 x64; do
+            base64 -d < "$dir/Excalidesk_$arch.app.tar.gz.sig" > "$dir/$arch.minisig"
+            comment=$(minisign -V -Q -p "$dir/key.pub" -m "$dir/Excalidesk_$arch.app.tar.gz" -x "$dir/$arch.minisig")
+            printf '%s\n' "$comment" | tr '\t' '\n' | grep -x "version:$version" >/dev/null \
+              || { echo "::error::Excalidesk_$arch.app.tar.gz is signed as \"$comment\", not for $version"; exit 1; }
+          done
+          base="https://github.com/$GITHUB_REPOSITORY/releases/download/$TAG"
+          platform() {
+            jq -n --rawfile sig "$dir/Excalidesk_$1.app.tar.gz.sig" --arg url "$base/Excalidesk_$1.app.tar.gz" \
+              '{signature: ($sig | rtrimstr("\n")), url: $url}'
+          }
+          jq -n --arg version "$version" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --argjson arm "$(platform aarch64)" --argjson intel "$(platform x64)" \
+            '{version: $version, pub_date: $date, platforms: {"darwin-aarch64": $arm, "darwin-x86_64": $intel}}' \
+            > "$dir/latest.json"
+          cat "$dir/latest.json"
+          gh release upload "$TAG" "$dir/latest.json" --repo "$GITHUB_REPOSITORY" --clobber

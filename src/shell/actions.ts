@@ -376,8 +376,8 @@ export function onFsChanged(paths: string[]) {
 }
 
 let closeAttempts = 0;
-/** 退出前把所有文档存完；有存不进去的，第一次拦下提示，第二次才直接退出 */
-export async function closeApp() {
+/** 退出（或装好更新后重启）前把所有文档存完；有存不进去的，第一次拦下提示，第二次才直接退出 */
+export async function closeApp(restart = false) {
   try {
     await flushAll();
   } catch {
@@ -385,10 +385,10 @@ export async function closeApp() {
   }
   const bad = getState().tabs.filter((t) => !t.missing && (t.save === "error" || t.save === "dirty"));
   if (bad.length && closeAttempts++ === 0) {
-    toast(t("toast.unsaved", { n: bad.length, names: bad.map((x) => x.title).join(getState().lang === "zh" ? "、" : ", ") }));
+    toast(t(restart ? "toast.unsavedRestart" : "toast.unsaved", { n: bad.length, names: bad.map((x) => x.title).join(getState().lang === "zh" ? "、" : ", ") }));
     return;
   }
-  await ipc.closeNow();
+  await (restart ? ipc.restartNow() : ipc.closeNow());
 }
 
 export function revealActive() {

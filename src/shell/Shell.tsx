@@ -3,7 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import "./shell.css";
 import { Editor } from "./Editor";
 import { basename, dirname, inTauri, ipc, isICloud, type HistoryEntry, type TreeNode } from "./ipc";
-import { getState, setState, updateSettings, useShell, type Settings, type Tab } from "./store";
+import { getState, hidePrompt, setState, updateSettings, useShell, type Settings, type Tab } from "./store";
 import { t, useT, type Key } from "./i18n";
 import { popup } from "./contextMenu";
 import {
@@ -13,6 +13,7 @@ import {
   syncWindowTitle, toggleHistory, trashPath, useICloudRoot,
 } from "./actions";
 import { runSelftest } from "./selftest";
+import { checkForUpdates, scheduleUpdateChecks } from "./updater";
 
 const SELFTEST = new URLSearchParams(location.search).get("selftest") === "1";
 
@@ -47,6 +48,7 @@ function onMenu(id: string) {
     case "next_tab": return cycleTab(1);
     case "prev_tab": return cycleTab(-1);
     case "settings": return setState({ settingsOpen: true });
+    case "check_updates": return checkForUpdates(true);
   }
 }
 
@@ -132,7 +134,9 @@ export default function Shell() {
     window.addEventListener("blur", onBlur);
     window.addEventListener("keydown", onKey);
     const sync = window.setInterval(() => refreshSync(getState().active), 4000);
+    const stopUpdates = SELFTEST ? () => {} : scheduleUpdateChecks();
     return () => {
+      stopUpdates();
       un.forEach((p) => p.then((f) => f()));
       window.removeEventListener("blur", onBlur);
       window.removeEventListener("keydown", onKey);
@@ -152,6 +156,7 @@ export default function Shell() {
         {!focus && <StatusBar />}
       </main>
       <SettingsDialog />
+      <PromptToast />
       <Toast />
     </div>
   );
@@ -683,7 +688,53 @@ function SettingsDialog() {
             <option value="name">{t("sort.name")}</option>
           </select>
         </div>
+        {inTauri && <UpdateSettings />}
       </div>
+    </div>
+  );
+}
+
+/** 只在 App 里：浏览器预览没有可更新的东西 */
+function UpdateSettings() {
+  const t = useT();
+  const autoUpdate = useShell((s) => s.settings.autoUpdate);
+  const [version, setVersion] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => {
+    import("@tauri-apps/api/app").then((m) => m.getVersion()).then(setVersion, () => {});
+  }, []);
+  const checkNow = async () => {
+    setChecking(true);
+    await checkForUpdates(true);
+    setChecking(false);
+  };
+  return (
+    <>
+      <label className="setting">
+        <span>
+          {t("settings.autoUpdate")}
+          <span className="setting-desc">{t("settings.autoUpdateDesc")}</span>
+        </span>
+        <input type="checkbox" checked={autoUpdate} onChange={(e) => updateSettings({ autoUpdate: e.target.checked })} />
+      </label>
+      <div className="setting">
+        <span>{version ? t("settings.version", { version }) : "Excalidesk"}</span>
+        <button disabled={checking} onClick={() => void checkNow()}>{checking ? t("settings.checking") : t("settings.checkNow")}</button>
+      </div>
+    </>
+  );
+}
+
+/** 等用户处理的提示：不自动消失，可以关掉 */
+function PromptToast() {
+  const t = useT();
+  const p = useShell((s) => s.prompt);
+  if (!p) return null;
+  return (
+    <div className="toast prompt" role="status">
+      <span>{p.msg}</span>
+      {p.action && <button onClick={p.action.run}>{p.action.label}</button>}
+      <button className="icon" title={t("app.close")} onClick={() => hidePrompt(p.id)}>{Icon.close}</button>
     </div>
   );
 }

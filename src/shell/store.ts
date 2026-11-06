@@ -9,8 +9,10 @@ export type Settings = {
   lang: "system" | "zh" | "en";
   /** 侧边栏排序，默认最新修改的在上面 */
   sort: "mtime" | "ctime" | "name";
+  /** 启动时和之后每隔几小时查一次新版本，下载装好 */
+  autoUpdate: boolean;
 };
-const DEFAULT_SETTINGS: Settings = { theme: "system", lang: "system", sort: "mtime" };
+const DEFAULT_SETTINGS: Settings = { theme: "system", lang: "system", sort: "mtime", autoUpdate: true };
 const loadSettings = (): Settings => {
   try {
     return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("settings") ?? "{}") };
@@ -37,6 +39,9 @@ export type Tab = {
   openedAt?: number;
 };
 
+/** 等用户处理的提示（装好的更新等重启）：不自动消失，普通 toast 也顶不掉它 */
+export type Prompt = { id: string; msg: string; action?: { label: string; run: () => void } };
+
 export type ShellState = {
   roots: string[];
   trees: Record<string, TreeNode[]>;
@@ -48,6 +53,7 @@ export type ShellState = {
   focus: boolean;
   sync: Record<string, SyncStatus>;
   toast?: string;
+  prompt?: Prompt;
   /** 侧边栏里正在行内重命名的路径 */
   renaming: string | null;
   history: boolean;
@@ -97,4 +103,11 @@ export function toast(msg: string) {
   setState({ toast: msg });
   clearTimeout(toastTimer);
   toastTimer = window.setTimeout(() => setState({ toast: undefined }), 3500);
+}
+
+/** 同一个 id 再显示就替换掉 */
+export const showPrompt = (prompt: Prompt) => setState({ prompt });
+/** 只关掉这个 id 的，别的提示已经顶上来就不动 */
+export function hidePrompt(id: string) {
+  if (getState().prompt?.id === id) setState({ prompt: undefined });
 }

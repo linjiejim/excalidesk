@@ -35,5 +35,14 @@
         "mimeType": "application/vnd.excalidraw+json"
       }
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDREOUJFRUJCOUFEOTQ0RkMKUldUOFJObWF1KzZiVFJHQTFJZDBKYmVHbjl1STk4THZmdk92UThMTjJUbmxlTEMwcHpycGlzcEMK",
+      "endpoints": [
+        "https://github.com/linjiejim/excalidesk/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true
+    }
   }
 }

@@ -1,8 +1,9 @@
-// 端到端自测（--selftest）：在临时工作区里把 P1 的主路径都走一遍，结果写到结果目录后退出。
+// 端到端自测（--selftest）：在临时工作区里把主路径和边界情况都走一遍，结果写到结果目录后退出。
+// 移到废纸篓和 iCloud 冲突不在这里测：前者会动到真实的废纸篓，后者需要两台设备。
 import { CaptureUpdateAction, convertToExcalidrawElements } from "@excalidraw/excalidraw";
-import { addRoot, activate, closeTab, exportActive, newDoc, openPath, sessions } from "./actions";
+import { activate, addRoot, closeTab, duplicatePath, exportActive, newDoc, newFolder, openPath, renamePath, sessions } from "./actions";
 import { ipc } from "./ipc";
-import { getState } from "./store";
+import { getState, setState } from "./store";
 
 type Step = { name: string; ok: boolean; ms: number; detail?: unknown };
 
@@ -18,9 +19,18 @@ async function waitFor<T>(f: () => T | Promise<T>, ms = 8000, every = 100): Prom
 }
 const rect = (x: number, y: number, extra: Record<string, unknown> = {}) =>
   convertToExcalidrawElements([{ type: "rectangle", x, y, width: 120, height: 80, ...extra } as any], { regenerateIds: false })[0] as any;
-const fileIds = (text: string) => (JSON.parse(text).elements as any[]).map((e) => e.id);
+const fileIds = (text: string) => (JSON.parse(text).elements as any[]).filter((e) => !e.isDeleted).map((e) => e.id);
 const session = (p: string) => sessions.get(p)!;
-const ready = (p: string) => getState().tabs.find((t) => t.path === p)?.phase === "ready" && !!session(p)?.api;
+const tabOf = (p: string) => getState().tabs.find((t) => t.path === p);
+const ready = (p: string) => tabOf(p)?.phase === "ready" && !!sessions.get(p)?.api;
+const exists = async (p: string) => (await ipc.debugSize(p)) > 0;
+const treeText = (root: string) => JSON.stringify(getState().trees[root] ?? []);
+/** 模拟用户在画布上的一次编辑（先触发「用户动过画布」，否则会被当成规整期里的自动变化） */
+function edit(p: string, f: (els: any[]) => any[]) {
+  const s = session(p);
+  s.userInput();
+  s.api.updateScene({ elements: f(s.api.getSceneElementsIncludingDeleted()), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+}
 
 const pageErrors: string[] = [];
 window.addEventListener("error", (e) => pageErrors.push(`${e.message} @${e.filename}:${e.lineno}`));
@@ -39,7 +49,7 @@ export async function runSelftest() {
       const st = getState();
       steps.push({
         name, ok: false, ms: Math.round(performance.now() - t0),
-        detail: { error: String((e as Error)?.message ?? e), tabs: st.tabs.map((t) => [t.title, t.phase, t.save, t.banner]), active: st.active, api: [...sessions].map(([p, x]) => [p.split("/").pop(), !!x.api, x.elements.length]), pageErrors: [...pageErrors] },
+        detail: { error: String((e as Error)?.message ?? e), tabs: st.tabs.map((t) => [t.title, t.phase, t.save, t.banner, t.missing]), active: st.active?.split("/").pop(), pageErrors: [...pageErrors] },
       });
       pageErrors.length = 0;
     }
@@ -47,17 +57,18 @@ export async function runSelftest() {
 
   const dir = await ipc.realPath(await ipc.selftestDir());
   const big = `${dir}/大图.excalidraw`;
-  const small = `${dir}/子文件夹/小图.excalidraw`;
+  let small = `${dir}/子文件夹/小图.excalidraw`;
+  const skewed = `${dir}/文字尺寸不准.excalidraw`;
+  const write = (p: string, scene: unknown) => ipc.writeBytes(p, new TextEncoder().encode(JSON.stringify(scene)));
 
   await step("准备工作区并扫描文件树", async () => {
     await ipc.writeBytes(big, new Uint8Array(await (await fetch("/scenes/large.excalidraw")).arrayBuffer()));
-    const scene = { type: "excalidraw", version: 2, elements: [rect(0, 0), rect(200, 0)], appState: {}, files: {} };
-    await ipc.writeBytes(small, new TextEncoder().encode(JSON.stringify(scene)));
+    await write(small, { type: "excalidraw", version: 2, elements: [rect(0, 0), rect(200, 0)], appState: {}, files: {} });
+    const text = { id: "skewed-text", type: "text", x: 0, y: 0, width: 1, height: 1, text: "文字尺寸是错的 wrong size", originalText: "文字尺寸是错的 wrong size", fontSize: 28, fontFamily: 5, textAlign: "left", verticalAlign: "top", containerId: null, autoResize: true, lineHeight: 1.25, version: 1, versionNonce: 1, index: "a0" };
+    await write(skewed, { type: "excalidraw", version: 2, elements: [text], appState: {}, files: {} });
     await addRoot(dir);
-    const tree = getState().trees[dir];
-    const names = JSON.stringify(tree);
-    if (!names.includes("大图") || !names.includes("小图")) throw new Error(`树里缺文件：${names}`);
-    return tree.map((n) => n.name);
+    for (const n of ["大图", "小图", "文字尺寸不准"]) if (!treeText(dir).includes(n)) throw new Error(`树里缺 ${n}`);
+    return getState().trees[dir].map((n) => n.name);
   });
 
   await step("打开小图", async () => {
@@ -70,35 +81,31 @@ export async function runSelftest() {
 
   let added: any;
   await step("编辑后自动保存（会话首次保存 = 全量）", async () => {
-    const s = session(small);
     added = rect(400, 0);
-    s.api.updateScene({ elements: [...s.api.getSceneElementsIncludingDeleted(), added], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    edit(small, (els) => [...els, added]);
     await waitFor(async () => fileIds(await ipc.debugRead(small)).includes(added.id), 5000);
-    return s.lastSave;
+    return session(small).lastSave;
   });
 
   await step("第二次编辑只发 1 个元素（增量）", async () => {
-    const s = session(small);
-    const els = s.api.getSceneElementsIncludingDeleted().map((e: any) => (e.id === added.id ? { ...e, x: e.x + 50, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e));
-    s.api.updateScene({ elements: els, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    edit(small, (els) => els.map((e) => (e.id === added.id ? { ...e, x: e.x + 50, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)));
     await waitFor(async () => (JSON.parse(await ipc.debugRead(small)).elements as any[]).find((e) => e.id === added.id)?.x === 450, 5000);
+    const s = session(small);
     if (s.lastSave.full || s.lastSave.upserts !== 1) throw new Error(JSON.stringify(s.lastSave));
     return s.lastSave;
   });
 
   await step("外部修改（本地无改动）→ 自动载入", async () => {
-    const ext = rect(0, 300, { id: "external-clean" });
-    await ipc.externalEdit(small, ext);
+    await ipc.externalEdit(small, rect(0, 300, { id: "external-clean" }));
     await waitFor(() => session(small).api.getSceneElements().some((e: any) => e.id === "external-clean"), 6000);
-    return getState().tabs.find((t) => t.path === small)?.banner;
+    return tabOf(small)?.banner;
   });
 
   await step("外部修改（本地有未保存改动）→ 按元素合并并保存", async () => {
     const s = session(small);
     s.debounceMs = 8000;
     s.maxWaitMs = 8000;
-    const local = rect(200, 300, { id: "local-dirty" });
-    s.api.updateScene({ elements: [...s.api.getSceneElementsIncludingDeleted(), local], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    edit(small, (els) => [...els, rect(200, 300, { id: "local-dirty" })]);
     await sleep(50);
     if (!s.isDirty()) throw new Error("本地应为未保存状态");
     await ipc.externalEdit(small, rect(400, 300, { id: "external-dirty" }));
@@ -108,14 +115,34 @@ export async function runSelftest() {
     }, 8000);
     s.debounceMs = 800;
     s.maxWaitMs = 5000;
-    const scene = s.api.getSceneElements().map((e: any) => e.id);
-    if (!scene.includes("local-dirty") || !scene.includes("external-dirty")) throw new Error("画布上缺元素");
-    return getState().tabs.find((t) => t.path === small)?.banner;
+    return tabOf(small)?.banner;
+  });
+
+  await step("打开文件后 Excalidraw 自己的规整不写盘", async () => {
+    session(small).api.updateScene({ appState: { scrollX: 123, scrollY: 45, zoom: { value: 0.8 } }, captureUpdate: CaptureUpdateAction.NEVER });
+    await sleep(100);
+    const before = await ipc.debugRead(skewed);
+    await openPath(skewed);
+    await waitFor(() => ready(skewed));
+    await sleep(4500);
+    const after = await ipc.debugRead(skewed);
+    const s = session(skewed);
+    // 确认规整真的发生了：文件里没有 gridStep，Excalidraw 挂载后会补上默认值
+    const gridStep = s.api.getAppState().gridStep;
+    if (JSON.parse(before).appState.gridStep !== undefined || !gridStep) throw new Error("没有发生规整，这一步无效");
+    if (after !== before || s.saves !== 0) throw new Error(`文件被改写了（保存 ${s.saves} 次）`);
+    return { save: tabOf(skewed)?.save, saves: s.saves, gridStep };
+  });
+
+  await step("用户真正编辑后保存（连同规整后的 appState）", async () => {
+    edit(skewed, (els) => [...els, rect(0, 200, { id: "after-settle" })]);
+    await waitFor(async () => fileIds(await ipc.debugRead(skewed)).includes("after-settle"), 5000);
+    const st = JSON.parse(await ipc.debugRead(skewed)).appState;
+    if (!st.gridStep) throw new Error(`appState ${JSON.stringify(st)}`);
+    return st;
   });
 
   await step("打开 3000 元素大图", async () => {
-    session(small).api.updateScene({ appState: { scrollX: 123, scrollY: 45, zoom: { value: 0.8 } }, captureUpdate: CaptureUpdateAction.NEVER });
-    await sleep(100);
     const t0 = performance.now();
     await openPath(big);
     await waitFor(() => ready(big), 15000);
@@ -133,13 +160,72 @@ export async function runSelftest() {
     return { scrollX: a.scrollX, zoom: a.zoom.value, elements: ids.length };
   });
 
-  await step("新建图", async () => {
-    await newDoc();
+  await step("重命名打开中的文件：标签跟着走，继续编辑存到新路径", async () => {
+    await activate(small);
+    await waitFor(() => ready(small));
+    const old = small;
+    await renamePath(old, "改过名的小图");
+    small = `${dir}/子文件夹/改过名的小图.excalidraw`;
+    if (!tabOf(small) || getState().active !== small) throw new Error("标签没跟着改名");
+    if (await exists(old)) throw new Error("旧文件还在");
+    await waitFor(() => treeText(dir).includes("改过名的小图"), 3000);
+    edit(small, (els) => [...els, rect(600, 600, { id: "after-rename" })]);
+    await waitFor(async () => fileIds(await ipc.debugRead(small)).includes("after-rename"), 5000);
+    return small.split("/").pop();
+  });
+
+  await step("创建副本", async () => {
+    await duplicatePath(small);
+    const copy = `${dir}/子文件夹/改过名的小图 副本.excalidraw`;
+    await waitFor(() => exists(copy), 3000);
+    if (!fileIds(await ipc.debugRead(copy)).includes("after-rename")) throw new Error("副本内容不对");
+    return copy.split("/").pop();
+  });
+
+  await step("新建文件夹并在里面新建图", async () => {
+    await newFolder(dir);
+    const folder = getState().renaming!;
+    setState({ renaming: null });
+    if (!folder?.endsWith("新建文件夹")) throw new Error(`文件夹 ${folder}`);
+    await waitFor(() => treeText(dir).includes("新建文件夹"), 3000);
+    await newDoc(folder);
     const p = getState().active!;
     await waitFor(() => ready(p));
-    if (!p.startsWith(`${dir}/子文件夹/`)) throw new Error(`新图位置 ${p}`);
-    await waitFor(() => JSON.stringify(getState().trees[dir]).includes("未命名"), 3000);
-    return p;
+    if (!p.startsWith(folder + "/")) throw new Error(`新图位置 ${p}`);
+    await closeTab(p);
+    return p.split("/").slice(-2).join("/");
+  });
+
+  await step("历史版本：自动留档并能恢复", async () => {
+    await activate(small);
+    await waitFor(() => ready(small));
+    const list = await ipc.historyList(small);
+    if (!list.length) throw new Error("没有历史版本");
+    const oldest = list[list.length - 1];
+    const snapIds = fileIds(await ipc.historyRead(small, oldest.id));
+    await session(small).restoreHistory(oldest.id);
+    const now = session(small).api.getSceneElements().map((e: any) => e.id).sort();
+    if (JSON.stringify(now) !== JSON.stringify([...snapIds].sort())) throw new Error(`画布 ${now.length} 个，快照 ${snapIds.length} 个`);
+    await waitFor(async () => JSON.stringify(fileIds(await ipc.debugRead(small)).sort()) === JSON.stringify([...snapIds].sort()), 5000);
+    const after = await ipc.historyList(small);
+    if (!after.some((e) => e.reason === "before_restore")) throw new Error("恢复前没留档");
+    return { versions: list.map((e) => e.reason), restored: snapIds.length };
+  });
+
+  await step("文件在外部被删除：暂停保存、不复活，可存回原位置", async () => {
+    const copy = `${dir}/子文件夹/改过名的小图 副本.excalidraw`;
+    await openPath(copy);
+    await waitFor(() => ready(copy));
+    await ipc.debugRemove(copy);
+    await waitFor(() => tabOf(copy)?.missing, 5000);
+    edit(copy, (els) => [...els, rect(0, 900, { id: "while-missing" })]);
+    await sleep(2000);
+    if (await exists(copy)) throw new Error("被删掉的文件被写回来了");
+    await session(copy).restoreAtPath();
+    await waitFor(async () => (await exists(copy)) && fileIds(await ipc.debugRead(copy)).includes("while-missing"), 5000);
+    if (tabOf(copy)?.missing) throw new Error("标签还标着丢失");
+    await closeTab(copy);
+    return "ok";
   });
 
   await step("导出 PNG / SVG", async () => {
@@ -154,14 +240,10 @@ export async function runSelftest() {
   });
 
   await step("关闭标签前保存", async () => {
-    const s = session(small);
-    const last = rect(0, 600, { id: "before-close" });
-    s.api.updateScene({ elements: [...s.api.getSceneElementsIncludingDeleted(), last], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    edit(small, (els) => [...els, rect(0, 600, { id: "before-close" })]);
     await sleep(100);
-    const dirty = s.isDirty();
     await closeTab(small);
-    const ids = fileIds(await ipc.debugRead(small));
-    if (!ids.includes("before-close")) throw new Error(`关闭时没保存 dirty=${dirty} lastSave=${JSON.stringify(s.lastSave)} sceneHas=${s.elements.some((e) => e.id === "before-close")}`);
+    if (!fileIds(await ipc.debugRead(small)).includes("before-close")) throw new Error("关闭时没保存");
     return { tabs: getState().tabs.length };
   });
 
@@ -174,6 +256,6 @@ export async function runSelftest() {
     return { elements: d.elements.length };
   });
 
-  const out = { env: "selftest", at: new Date().toISOString(), dir, passed: steps.filter((s) => s.ok).length, total: steps.length, steps };
+  const out = { env: "selftest", at: new Date().toISOString(), passed: steps.filter((s) => s.ok).length, total: steps.length, steps };
   await ipc.benchResult(JSON.stringify(out, null, 2));
 }

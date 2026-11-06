@@ -18,7 +18,11 @@ pub struct Doc {
     files: Map<String, Value>,
     /// 最近一次由我们写入（或读入）时磁盘上的 (mtime, len)，用来区分外部修改和自己写的回声
     pub disk: Option<(SystemTime, u64)>,
+    /// 最近一次历史快照的时间：编辑中最多每 5 分钟留一份
+    pub last_snapshot: Option<Instant>,
 }
+
+const SNAPSHOT_EVERY: std::time::Duration = std::time::Duration::from_secs(300);
 
 #[derive(Default)]
 pub struct DocStore(pub Mutex<HashMap<PathBuf, Doc>>);
@@ -82,9 +86,8 @@ impl Doc {
         }
     }
 
-    /// 元素按 fractional index（base62 字符串，ASCII 序即大小序）排序；没有 index 的排在最后，再按 id 稳定排序。
-    /// 只保留仍被未删除图片元素引用的图片（和官方 serializeAsJSON 一致）。
-    pub fn serialize(&self) -> Vec<u8> {
+    /// 元素按 fractional index（base62 字符串，ASCII 序即大小序）排序；没有 index 的排在最后，再按 id 稳定排序
+    pub fn sorted(&self) -> Vec<&Value> {
         let mut els: Vec<&Value> = self.elements.values().collect();
         els.sort_by(|a, b| {
             let ia = a.get("index").and_then(Value::as_str);
@@ -97,6 +100,12 @@ impl Doc {
             }
             .then_with(|| a.get("id").and_then(Value::as_str).cmp(&b.get("id").and_then(Value::as_str)))
         });
+        els
+    }
+
+    /// 只保留仍被未删除图片元素引用的图片（和官方 serializeAsJSON 一致）
+    pub fn serialize(&self) -> Vec<u8> {
+        let els = self.sorted();
         let mut files = Map::new();
         for e in &els {
             let deleted = e.get("isDeleted").and_then(Value::as_bool).unwrap_or(false);
@@ -120,6 +129,14 @@ impl Doc {
     pub fn len(&self) -> usize {
         self.elements.len()
     }
+
+    pub fn snapshot(&mut self, history_root: &Path, path: &Path, reason: &str) -> Result<crate::history::Entry, String> {
+        if self.elements.is_empty() {
+            return Err("空文档不留快照".into());
+        }
+        self.last_snapshot = Some(Instant::now());
+        crate::history::snapshot(history_root, path, &self.sorted(), &self.app_state, &self.files, reason)
+    }
 }
 
 /// 读：iCloud 里还没下载的文件，协调读会阻塞到下载完成，所以调用方必须在后台线程
@@ -141,7 +158,7 @@ pub fn write_file(p: &Path, bytes: &[u8]) -> Result<(), String> {
     }
 }
 
-pub fn save(store: &DocStore, path: &Path, delta: Delta) -> Result<SaveResult, String> {
+pub fn save(store: &DocStore, path: &Path, delta: Delta, history_root: &Path) -> Result<SaveResult, String> {
     let t = Instant::now();
     let mut map = store.0.lock().unwrap();
     let doc = map.get_mut(path).ok_or("文档没有打开")?;
@@ -149,7 +166,35 @@ pub fn save(store: &DocStore, path: &Path, delta: Delta) -> Result<SaveResult, S
     let bytes = doc.serialize();
     write_file(path, &bytes)?;
     doc.disk = disk_meta(path);
+    if doc.last_snapshot.map(|s| s.elapsed() >= SNAPSHOT_EVERY).unwrap_or(true) {
+        let _ = doc.snapshot(history_root, path, "auto");
+    }
     Ok(SaveResult { bytes: bytes.len(), elements: doc.len(), ms: t.elapsed().as_secs_f64() * 1e3 })
+}
+
+/// 磁盘状态：和我们最后一次读写时比
+#[derive(Serialize, PartialEq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum DiskStatus {
+    Same,
+    Changed,
+    Missing,
+}
+
+/// 打开中的文档、且磁盘状态和我们最后一次读写一致：说明这个文件事件是自己保存引起的
+pub fn is_own_write(store: &DocStore, path: &Path) -> bool {
+    let map = store.0.lock().unwrap();
+    map.get(path).map(|d| d.disk.is_some() && disk_meta(path) == d.disk).unwrap_or(false)
+}
+
+pub fn disk_status(store: &DocStore, path: &Path) -> DiskStatus {
+    let map = store.0.lock().unwrap();
+    let Some(d) = map.get(path) else { return DiskStatus::Same };
+    match disk_meta(path) {
+        None if !path.exists() => DiskStatus::Missing,
+        m if m != d.disk => DiskStatus::Changed,
+        _ => DiskStatus::Same,
+    }
 }
 
 #[cfg(test)]

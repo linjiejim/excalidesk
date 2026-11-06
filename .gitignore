@@ -34,3 +34,12 @@ public/scenes
 # 基准原始结果（含本机路径、UA）
 bench/results
 bench/wkfps
+
+# logo 备选稿（不入库）
+design/logo/candidates/
+
+# 本地工具配置
+.claude/
+
+# 打包产物
+release/

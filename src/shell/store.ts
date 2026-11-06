@@ -14,6 +14,8 @@ export type Tab = {
   saveError?: string;
   elements: number;
   banner?: string;
+  /** 文件在外部被删除或移走 */
+  missing?: boolean;
 };
 
 export type ShellState = {
@@ -27,11 +29,18 @@ export type ShellState = {
   focus: boolean;
   sync: Record<string, SyncStatus>;
   toast?: string;
+  /** 侧边栏里正在行内重命名的路径 */
+  renaming: string | null;
+  history: boolean;
+  fullscreen: boolean;
+  sidebarWidth: number;
 };
 
 let state: ShellState = {
   roots: [], trees: {}, recent: [], viewports: {}, tabs: [], active: null,
-  sidebar: true, focus: false, sync: {},
+  sidebar: localStorage.getItem("sidebar") !== "0", focus: false, sync: {},
+  renaming: null, history: false, fullscreen: false,
+  sidebarWidth: Number(localStorage.getItem("sidebarWidth")) || 240,
 };
 const listeners = new Set<() => void>();
 

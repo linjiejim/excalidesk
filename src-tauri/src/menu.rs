@@ -29,6 +29,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         &item("save", "保存", Some("CmdOrCtrl+S"))?,
         &item("export_png", "导出 PNG…", Some("CmdOrCtrl+Shift+E"))?,
         &item("export_svg", "导出 SVG…", None)?,
+        &item("history", "历史版本…", Some("CmdOrCtrl+Alt+Y"))?,
         &sep()?,
         &item("reveal", "在 Finder 中显示", Some("CmdOrCtrl+Shift+R"))?,
         &item("close_tab", "关闭标签页", Some("CmdOrCtrl+W"))?,

@@ -93,7 +93,16 @@ pub fn probe() -> Value {
 }
 
 #[cfg(target_os = "macos")]
-pub use mac::{coordinated_read, coordinated_write, sync_status};
+pub use mac::{conflict_versions, coordinated_read, coordinated_write, resolve_conflicts, sync_status, trash};
+
+/// iCloud 冲突版本（NSFileVersion）
+#[derive(serde::Serialize, Clone)]
+pub struct ConflictVersion {
+    /// 版本内容所在的路径（系统的版本库里），只读
+    pub path: String,
+    pub device: String,
+    pub modified: f64,
+}
 
 /// iCloud 同步状态（非 iCloud 路径 ubiquitous=false）
 #[derive(serde::Serialize, Default)]
@@ -262,6 +271,67 @@ mod mac {
             downloading: bool_of(resource(&u, "NSURLUbiquitousItemIsDownloadingKey")),
             conflict: bool_of(resource(&u, "NSURLUbiquitousItemHasUnresolvedConflictsKey")),
         }
+    }
+
+    /// 移到废纸篓（可恢复），返回废纸篓里的新路径
+    pub fn trash(p: &Path) -> Result<String, String> {
+        let fm = NSFileManager::defaultManager();
+        let u = url(p);
+        let mut out: *mut NSURL = std::ptr::null_mut();
+        let mut err: *mut NSError = std::ptr::null_mut();
+        let ok: Bool = unsafe { msg_send![&*fm, trashItemAtURL: &*u, resultingItemURL: &mut out, error: &mut err] };
+        if !ok.as_bool() {
+            return Err(err_text(err).unwrap_or_else(|| "移到废纸篓失败".into()));
+        }
+        Ok(if out.is_null() { String::new() } else { unsafe { (*out).path().map(|s| s.to_string()).unwrap_or_default() } })
+    }
+
+    pub fn conflict_versions(p: &Path) -> Vec<super::ConflictVersion> {
+        let Some(cls) = AnyClass::get(c"NSFileVersion") else { return vec![] };
+        let u = url(p);
+        let mut out = vec![];
+        unsafe {
+            let arr: *mut AnyObject = msg_send![cls, unresolvedConflictVersionsOfItemAtURL: &*u];
+            if arr.is_null() {
+                return out;
+            }
+            let n: usize = msg_send![arr, count];
+            for i in 0..n {
+                let v: *mut AnyObject = msg_send![arr, objectAtIndex: i];
+                let vu: *mut NSURL = msg_send![v, URL];
+                let name: *mut NSString = msg_send![v, localizedNameOfSavingComputer];
+                let date: *mut AnyObject = msg_send![v, modificationDate];
+                let modified: f64 = if date.is_null() { 0.0 } else { msg_send![date, timeIntervalSince1970] };
+                out.push(super::ConflictVersion {
+                    path: if vu.is_null() { String::new() } else { (*vu).path().map(|s| s.to_string()).unwrap_or_default() },
+                    device: if name.is_null() { String::new() } else { (*name).to_string() },
+                    modified,
+                });
+            }
+        }
+        out
+    }
+
+    /// 冲突版本都已合并进当前文件：标记已解决并清掉
+    pub fn resolve_conflicts(p: &Path) -> Result<(), String> {
+        let Some(cls) = AnyClass::get(c"NSFileVersion") else { return Ok(()) };
+        let u = url(p);
+        unsafe {
+            let arr: *mut AnyObject = msg_send![cls, unresolvedConflictVersionsOfItemAtURL: &*u];
+            if !arr.is_null() {
+                let n: usize = msg_send![arr, count];
+                for i in 0..n {
+                    let v: *mut AnyObject = msg_send![arr, objectAtIndex: i];
+                    let _: () = msg_send![v, setResolved: Bool::YES];
+                }
+            }
+            let mut err: *mut NSError = std::ptr::null_mut();
+            let ok: Bool = msg_send![cls, removeOtherVersionsOfItemAtURL: &*u, error: &mut err];
+            if !ok.as_bool() {
+                return Err(err_text(err).unwrap_or_default());
+            }
+        }
+        Ok(())
     }
 
     #[allow(dead_code)]

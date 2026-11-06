@@ -1,6 +1,6 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 
 // 浏览器跑基准时，把结果 POST 到 /__bench，落到 bench/results/
 const benchSink = (): Plugin => {
@@ -22,8 +22,17 @@ const benchSink = (): Plugin => {
   };
 };
 
+// 发布构建（EXCALIDESK_RELEASE=1）不带基准 / 自测用的测试场景
+const stripBenchAssets = (): Plugin => ({
+  name: "strip-bench-assets",
+  apply: "build",
+  closeBundle() {
+    if (process.env.EXCALIDESK_RELEASE === "1") rmSync("dist/scenes", { recursive: true, force: true });
+  },
+});
+
 export default defineConfig(() => ({
-  plugins: [react(), benchSink()],
+  plugins: [react(), benchSink(), stripBenchAssets()],
   clearScreen: false,
   server: { port: 1420, strictPort: true, watch: { ignored: ["**/src-tauri/**"] } },
   preview: { port: 4173, strictPort: true },

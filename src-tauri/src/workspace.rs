@@ -9,7 +9,7 @@ use std::{
 
 use notify::{RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 #[derive(Serialize, Deserialize, Default, Clone)]
 pub struct Persisted {
@@ -100,7 +100,11 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<Node> {
                 continue;
             }
             let children = scan(&path, depth - 1);
-            if !children.is_empty() {
+            // 有图的文件夹显示；完全空的文件夹也显示（刚在侧边栏里新建的）
+            let empty = std::fs::read_dir(&path)
+                .map(|it| it.flatten().all(|e| e.file_name().to_string_lossy().starts_with('.')))
+                .unwrap_or(false);
+            if !children.is_empty() || empty {
                 out.push(Node { name, path: path.display().to_string(), dir: true, children, mtime: 0, dataless: false });
             }
         } else if let Some(real) = name.strip_prefix('.').and_then(|n| n.strip_suffix(".icloud")).filter(|n| n.ends_with(EXT)) {
@@ -121,13 +125,53 @@ pub fn scan(dir: &Path, depth: usize) -> Vec<Node> {
     out
 }
 
+/// 文件夹下所有 .excalidraw（重命名文件夹时搬历史版本用）
+pub fn all_docs(dir: &Path) -> Vec<PathBuf> {
+    let mut out = vec![];
+    for n in scan(dir, 12) {
+        collect(&n, &mut out);
+    }
+    out
+}
+
+fn collect(n: &Node, out: &mut Vec<PathBuf>) {
+    if n.dir {
+        n.children.iter().for_each(|c| collect(c, out));
+    } else {
+        out.push(PathBuf::from(&n.path));
+    }
+}
+
 /// 在 dir 下找一个不重名的「未命名 N.excalidraw」
 pub fn unique_name(dir: &Path, base: &str) -> PathBuf {
-    let first = dir.join(format!("{base}{EXT}"));
+    unique_with_ext(dir, base, EXT)
+}
+
+/// ext 为空时用于文件夹
+pub fn unique_with_ext(dir: &Path, base: &str, ext: &str) -> PathBuf {
+    let first = dir.join(format!("{base}{ext}"));
     if !first.exists() {
         return first;
     }
-    (2..).map(|i| dir.join(format!("{base} {i}{EXT}"))).find(|p| !p.exists()).unwrap()
+    (2..).map(|i| dir.join(format!("{base} {i}{ext}"))).find(|p| !p.exists()).unwrap()
+}
+
+/// 重命名后同步更新视口和最近打开里的路径（文件或文件夹）
+pub fn rename_paths(p: &mut Persisted, from: &str, to: &str) {
+    let map = |s: &str| -> Option<String> {
+        if s == from {
+            Some(to.to_string())
+        } else {
+            s.strip_prefix(&format!("{from}/")).map(|rest| format!("{to}/{rest}"))
+        }
+    };
+    for r in p.recent.iter_mut().chain(p.roots.iter_mut()) {
+        if let Some(n) = map(r) {
+            *r = n;
+        }
+    }
+    let vps: Vec<(String, Viewport)> = p.viewports.drain().map(|(k, v)| (map(&k).unwrap_or(k), v)).collect();
+    p.viewports.extend(vps);
 }
 
 /// FSEvents 监听：300ms 内的变化合并成一次 `fs-changed` 事件
@@ -154,8 +198,11 @@ pub fn rewatch(app: &AppHandle, watch: &Watch, paths: &[(PathBuf, bool)]) -> Res
             while let Ok(p) = rx.recv_timeout(Duration::from_millis(300)) {
                 batch.push(p);
             }
+            // 自己保存引起的事件（磁盘状态和最后一次写入一致）不再通知前端，省得每次保存都重扫目录树
+            let store = app.state::<crate::doc::DocStore>();
             let mut names: Vec<String> = batch
                 .into_iter()
+                .filter(|p| !crate::doc::is_own_write(&store, p))
                 .map(|p| p.display().to_string())
                 .filter(|s| !s.ends_with(".tmp~"))
                 .collect();
@@ -176,6 +223,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn rename_updates_recent_and_viewports() {
+        let mut p = Persisted::default();
+        p.recent = vec!["/a/x.excalidraw".into(), "/a/sub/y.excalidraw".into(), "/b/z.excalidraw".into()];
+        p.viewports.insert("/a/sub/y.excalidraw".into(), Viewport { scroll_x: 1.0, scroll_y: 2.0, zoom: 1.0 });
+        rename_paths(&mut p, "/a/sub", "/a/sub2");
+        assert_eq!(p.recent[1], "/a/sub2/y.excalidraw");
+        assert!(p.viewports.contains_key("/a/sub2/y.excalidraw"));
+        rename_paths(&mut p, "/a/x.excalidraw", "/a/w.excalidraw");
+        assert_eq!(p.recent[0], "/a/w.excalidraw");
+        assert_eq!(p.recent[2], "/b/z.excalidraw");
+    }
+
+    #[test]
     fn scan_filters_and_sorts() {
         let d = std::env::temp_dir().join(format!("excalidesk-scan-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -187,10 +247,14 @@ mod tests {
         }
         let t = scan(&d, 6);
         let names: Vec<_> = t.iter().map(|n| n.name.as_str()).collect();
-        assert_eq!(names, ["b-dir", "alpha", "gone", "Zeta"]);
+        assert_eq!(names, ["b-dir", "empty-dir", "alpha", "gone", "Zeta"]);
         assert!(t.iter().find(|n| n.name == "gone").unwrap().dataless);
         assert_eq!(t[0].children[0].children[0].name, "x");
         assert_eq!(unique_name(&d, "alpha"), d.join("alpha 2.excalidraw"));
+        // 空文件夹显示，没有图的非空文件夹不显示
+        assert!(t.iter().any(|n| n.name == "empty-dir"));
+        std::fs::write(d.join("empty-dir/readme.txt"), "x").unwrap();
+        assert!(!scan(&d, 6).iter().any(|n| n.name == "empty-dir"));
         std::fs::remove_dir_all(&d).unwrap();
     }
 }

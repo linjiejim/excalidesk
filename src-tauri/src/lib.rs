@@ -1,7 +1,7 @@
 use std::{
     fs,
     io::Write,
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Mutex,
@@ -17,6 +17,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod doc;
 mod fps;
+mod history;
 mod icloud;
 mod menu;
 mod workspace;
@@ -39,6 +40,8 @@ struct Opts {
     selftest: bool,
     autoquit: bool,
     icloud_probe: bool,
+    /// 基准模式下也用正式窗口样式，用来测它对渲染的影响
+    vibrant: bool,
 }
 
 fn parse_opts() -> Opts {
@@ -51,6 +54,7 @@ fn parse_opts() -> Opts {
         selftest: false,
         autoquit: false,
         icloud_probe: false,
+        vibrant: false,
     };
     for a in std::env::args().skip(1) {
         if let Some(v) = a.strip_prefix("--fps=") {
@@ -67,6 +71,8 @@ fn parse_opts() -> Opts {
             o.selftest = true;
         } else if a == "--autoquit" {
             o.autoquit = true;
+        } else if a == "--vibrant" {
+            o.vibrant = true;
         } else if a == "--icloud-probe" {
             o.icloud_probe = true;
         }
@@ -79,6 +85,9 @@ fn parse_opts() -> Opts {
 
 #[derive(Default)]
 struct PendingOpens(Mutex<Vec<String>>);
+
+/// 历史快照根目录：和状态文件放在一起
+struct HistoryRoot(PathBuf);
 
 /// header 只能放 ASCII，前端用 encodeURIComponent 传路径
 fn percent_decode(s: &str) -> String {
@@ -234,16 +243,10 @@ async fn doc_open(app: AppHandle, path: String) -> Result<Response, String> {
     Ok(Response::new(bytes))
 }
 
-/// 外部修改：磁盘上的 (mtime, len) 和我们最后一次读写时不同
+/// 外部修改 / 被删除或移走：磁盘上的 (mtime, len) 和我们最后一次读写时比
 #[tauri::command]
-fn doc_disk_changed(app: AppHandle, path: String) -> bool {
-    let p = PathBuf::from(path);
-    let store = app.state::<DocStore>();
-    let map = store.0.lock().unwrap();
-    match map.get(&p) {
-        Some(d) => p.exists() && doc::disk_meta(&p) != d.disk,
-        None => false,
-    }
+fn doc_disk_status(app: AppHandle, path: String) -> doc::DiskStatus {
+    doc::disk_status(&app.state::<DocStore>(), &PathBuf::from(path))
 }
 
 #[tauri::command]
@@ -258,7 +261,7 @@ async fn doc_save(app: AppHandle, request: Request<'_>) -> Result<SaveResult, St
     let body = raw_body(&request)?;
     blocking(move || {
         let delta: Delta = serde_json::from_slice(&body).map_err(|e| e.to_string())?;
-        doc::save(&app.state::<DocStore>(), &path, delta)
+        doc::save(&app.state::<DocStore>(), &path, delta, &app.state::<HistoryRoot>().0)
     })
     .await
 }
@@ -268,6 +271,165 @@ fn doc_create(dir: String, base: Option<String>) -> Result<String, String> {
     let p = workspace::unique_name(&PathBuf::from(dir), base.as_deref().unwrap_or("未命名"));
     doc::write_file(&p, &Doc::default().serialize())?;
     Ok(p.display().to_string())
+}
+
+// ── 历史版本 / iCloud 冲突 ─────────────────────────────
+
+#[tauri::command]
+fn history_list(app: AppHandle, path: String) -> Vec<history::Entry> {
+    history::list(&app.state::<HistoryRoot>().0, &PathBuf::from(path))
+}
+
+#[tauri::command]
+async fn history_read(app: AppHandle, path: String, id: String) -> Result<Response, String> {
+    let root = app.state::<HistoryRoot>().0.clone();
+    blocking(move || history::read(&root, &PathBuf::from(path), &id)).await.map(Response::new)
+}
+
+/// 合并外部修改 / 冲突版本、恢复历史之前，先给当前内容留一份
+#[tauri::command]
+fn history_snapshot(app: AppHandle, path: String, reason: String) -> Result<Option<history::Entry>, String> {
+    let p = PathBuf::from(path);
+    let root = app.state::<HistoryRoot>().0.clone();
+    let store = app.state::<DocStore>();
+    let mut map = store.0.lock().unwrap();
+    Ok(map.get_mut(&p).and_then(|d| d.snapshot(&root, &p, &reason).ok()))
+}
+
+#[tauri::command]
+fn conflicts_list(path: String) -> Vec<icloud::ConflictVersion> {
+    #[cfg(target_os = "macos")]
+    return icloud::conflict_versions(&PathBuf::from(path));
+    #[cfg(not(target_os = "macos"))]
+    vec![]
+}
+
+/// 冲突版本的内容（在系统版本库里，只读）
+#[tauri::command]
+async fn conflict_read(version_path: String) -> Result<Response, String> {
+    blocking(move || fs::read(&version_path).map_err(|e| e.to_string())).await.map(Response::new)
+}
+
+#[tauri::command]
+fn conflicts_resolve(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return icloud::resolve_conflicts(&PathBuf::from(path));
+    #[cfg(not(target_os = "macos"))]
+    Ok(())
+}
+
+// ── 文件操作（侧边栏右键菜单）──────────────────────────
+
+fn check_name(name: &str) -> Result<String, String> {
+    let n = name.trim();
+    if n.is_empty() || n.contains('/') || n.starts_with('.') || n.contains(':') {
+        return Err("名字不能为空，也不能包含 / 或 :，不能以 . 开头".into());
+    }
+    Ok(n.to_string())
+}
+
+/// 重命名文件或文件夹；打开中的文档、视口、最近打开、历史版本都跟着改
+#[tauri::command]
+async fn path_rename(app: AppHandle, from: String, name: String) -> Result<String, String> {
+    let src = PathBuf::from(&from);
+    let mut n = check_name(&name)?;
+    let is_file = src.is_file();
+    if is_file && !n.ends_with(workspace::EXT) {
+        n.push_str(workspace::EXT);
+    }
+    let dst = src.parent().ok_or("没有上级目录")?.join(&n);
+    if dst == src {
+        return Ok(from);
+    }
+    if dst.exists() {
+        return Err(format!("「{n}」已经存在"));
+    }
+    let to = dst.display().to_string();
+    let a = app.clone();
+    let (from2, to2) = (from.clone(), to.clone());
+    blocking(move || {
+        fs::rename(&src, &dst).map_err(|e| e.to_string())?;
+        let root = a.state::<HistoryRoot>().0.clone();
+        // 打开中的文档换 key
+        {
+            let store = a.state::<DocStore>();
+            let mut map = store.0.lock().unwrap();
+            let keys: Vec<PathBuf> = map.keys().filter(|k| *k == &src || k.starts_with(&src)).cloned().collect();
+            for k in keys {
+                let nk = dst.join(k.strip_prefix(&src).unwrap_or(Path::new("")));
+                let nk = if k == src { dst.clone() } else { nk };
+                if let Some(mut d) = map.remove(&k) {
+                    d.disk = doc::disk_meta(&nk);
+                    map.insert(nk, d);
+                }
+            }
+        }
+        // 历史版本按路径哈希存，逐个搬
+        if is_file {
+            history::rename(&root, &src, &dst);
+        } else {
+            for f in workspace::all_docs(&dst) {
+                let old = src.join(f.strip_prefix(&dst).unwrap());
+                history::rename(&root, &old, &f);
+            }
+        }
+        a.state::<StateFile>().update(|st| workspace::rename_paths(st, &from2, &to2));
+        Ok(())
+    })
+    .await?;
+    Ok(to)
+}
+
+#[tauri::command]
+async fn path_duplicate(path: String) -> Result<String, String> {
+    blocking(move || {
+        let src = PathBuf::from(&path);
+        let stem = src.file_name().map(|n| n.to_string_lossy().trim_end_matches(workspace::EXT).to_string()).unwrap_or_default();
+        let dst = workspace::unique_name(src.parent().ok_or("没有上级目录")?, &format!("{stem} 副本"));
+        let bytes = doc::read_file(&src)?;
+        doc::write_file(&dst, &bytes)?;
+        Ok(dst.display().to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn path_trash(app: AppHandle, path: String) -> Result<String, String> {
+    let p = PathBuf::from(&path);
+    app.state::<DocStore>().0.lock().unwrap().retain(|k, _| k != &p && !k.starts_with(&p));
+    blocking(move || {
+        #[cfg(target_os = "macos")]
+        return icloud::trash(&p);
+        #[cfg(not(target_os = "macos"))]
+        Err::<String, String>("只支持 macOS".into())
+    })
+    .await
+}
+
+#[tauri::command]
+fn dir_create(parent: String, name: Option<String>) -> Result<String, String> {
+    let base = check_name(name.as_deref().unwrap_or("新建文件夹"))?;
+    let d = workspace::unique_with_ext(&PathBuf::from(parent), &base, "");
+    fs::create_dir(&d).map_err(|e| e.to_string())?;
+    Ok(d.display().to_string())
+}
+
+#[tauri::command]
+fn copy_text(text: String) -> Result<(), String> {
+    let mut child = std::process::Command::new("pbcopy").stdin(std::process::Stdio::piped()).spawn().map_err(|e| e.to_string())?;
+    child.stdin.take().unwrap().write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    child.wait().map(|_| ()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn confirm(app: AppHandle, title: String, message: String, ok: String) -> bool {
+    use tauri_plugin_dialog::{MessageDialogButtons, MessageDialogKind};
+    app.dialog()
+        .message(message)
+        .title(title)
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(ok, "取消".into()))
+        .blocking_show()
 }
 
 #[tauri::command]
@@ -362,6 +524,17 @@ fn debug_read(path: String) -> Result<String, String> {
     fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
+/// 自测：模拟文件在外部被删掉（只允许临时目录）
+#[tauri::command]
+fn debug_remove(path: String) -> Result<(), String> {
+    let p = fs::canonicalize(&path).map_err(|e| e.to_string())?;
+    let tmp = fs::canonicalize(std::env::temp_dir()).map_err(|e| e.to_string())?;
+    if !p.starts_with(&tmp) {
+        return Err("只能删临时目录里的文件".into());
+    }
+    fs::remove_file(p).map_err(|e| e.to_string())
+}
+
 /// 模拟另一台设备改了文件：直接改磁盘，不经过 DocStore
 #[tauri::command]
 async fn external_edit(path: String, element: serde_json::Value) -> Result<(), String> {
@@ -389,7 +562,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             state_get, workspace_pick, workspace_add, workspace_remove, tree, watch_set, viewport_set,
             sync_status, reveal, take_pending_opens, icloud_default_dir, real_path,
-            doc_open, doc_disk_changed, doc_close, doc_save, doc_create,
+            doc_open, doc_disk_status, doc_close, doc_save, doc_create,
+            history_list, history_read, history_snapshot, conflicts_list, conflict_read, conflicts_resolve,
+            path_rename, path_duplicate, path_trash, dir_create, copy_text, confirm, debug_remove,
             pick_open_file, pick_save_path, write_bytes, close_now,
             bench_result, save_doc, opts, icloud::icloud_probe, selftest_dir, debug_read, debug_size, external_edit,
         ])
@@ -397,6 +572,7 @@ pub fn run() {
             let state_path = o.state.clone().unwrap_or_else(|| {
                 app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir()).join("state.json")
             });
+            app.manage(HistoryRoot(state_path.parent().map(|p| p.join("history")).unwrap_or_else(|| std::env::temp_dir().join("excalidesk-history"))));
             app.manage(StateFile::load(state_path));
             app.set_menu(menu::build(app.handle())?)?;
             app.on_menu_event(|app, ev| {
@@ -411,12 +587,21 @@ pub fn run() {
                 "index.html".to_string()
             };
             let title = if o.bench { format!("Excalidesk · {}", o.env) } else { "Excalidesk".into() };
-            let win = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(query.into()))
+            let mut builder = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(query.into()))
                 .title(title)
                 .inner_size(1360.0, 900.0)
                 .min_inner_size(720.0, 480.0)
-                .disable_drag_drop_handler()
-                .build()?;
+                .disable_drag_drop_handler();
+            // 标题栏透明、红绿灯叠在内容上，标题栏和标签栏合成一条。
+            // 不用窗口透明 + 毛玻璃：实测透明 WKWebView 每帧要带 alpha 合成，30% 缩放平移从 47fps 掉到 24fps。
+            #[cfg(target_os = "macos")]
+            if !o.bench || o.vibrant {
+                builder = builder
+                    .title_bar_style(tauri::TitleBarStyle::Overlay)
+                    .hidden_title(true)
+                    .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0));
+            }
+            let win = builder.build()?;
             let handle = app.handle().clone();
             win.on_window_event(move |ev| {
                 if let WindowEvent::CloseRequested { api, .. } = ev {

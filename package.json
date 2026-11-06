@@ -1,7 +1,7 @@
 {
   "name": "excalidesk",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "prepare-assets": "node scripts/prepare-assets.mjs",
@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p .",
     "tauri": "tauri",
     "app": "CARGO_NET_OFFLINE=${CARGO_NET_OFFLINE:-false} tauri build --bundles app",
-    "selftest": "bench/selftest.sh"
+    "selftest": "bench/selftest.sh",
+    "release": "scripts/release.sh"
   },
   "dependencies": {
     "@excalidraw/excalidraw": "^0.18.1",

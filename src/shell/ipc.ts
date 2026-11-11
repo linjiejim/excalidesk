@@ -1,6 +1,7 @@
 // Rust 命令的类型化封装。大块数据（文档正文、导出图片）走原始字节，不经 JSON。
 import { invoke } from "@tauri-apps/api/core";
 import { mockIpc } from "./mockIpc";
+import type { AgentView } from "./store";
 
 export type Viewport = { scrollX: number; scrollY: number; zoom: number };
 export type Persisted = { roots: string[]; recent: string[]; viewports: Record<string, Viewport> };
@@ -51,6 +52,12 @@ const realIpc = {
   mkdir: (parent: string, name?: string) => invoke<string>("dir_create", { parent, name }),
   copyText: (text: string) => invoke<void>("copy_text", { text }),
   confirm: (title: string, message: string, ok: string, cancel: string) => invoke<boolean>("confirm", { title, message, ok, cancel }),
+  // Agent（MCP）
+  mcpReady: () => invoke<AgentView[]>("mcp_ready"),
+  mcpReply: (id: number, ok: boolean, value: unknown) => invoke<void>("mcp_reply", { id, ok, value }),
+  mcpSend: (path: string) => invoke<{ woke: string[]; pushed: string[] }>("mcp_send", { path }),
+  mcpInfo: () => invoke<{ exe: string; socket: string; enabled: boolean }>("mcp_info"),
+  mcpSetEnabled: (on: boolean) => invoke<void>("mcp_set_enabled", { on }),
   // 自测辅助
   selftestDir: () => invoke<string>("selftest_dir"),
   debugRead: (path: string) => invoke<string>("debug_read", { path }),

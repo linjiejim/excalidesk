@@ -126,6 +126,11 @@ impl Doc {
         serde_json::to_vec_pretty(&doc).unwrap_or_default()
     }
 
+    /// 按 fractional index 排好序的全部元素（含删除墓碑）
+    pub fn elements(&self) -> Vec<Value> {
+        self.sorted().into_iter().cloned().collect()
+    }
+
     pub fn len(&self) -> usize {
         self.elements.len()
     }

@@ -13,6 +13,8 @@ import {
   syncWindowTitle, toggleHistory, trashPath, useICloudRoot,
 } from "./actions";
 import { runSelftest } from "./selftest";
+import { commitComment, initAgents, nextComment, sendToAgent, startComment } from "./agent";
+import type { AgentView } from "./store";
 import { checkForUpdates, scheduleUpdateChecks } from "./updater";
 
 const SELFTEST = new URLSearchParams(location.search).get("selftest") === "1";
@@ -113,7 +115,7 @@ export default function Shell() {
     const un: Promise<() => void>[] = !inTauri ? [] : [
       listen<string>("menu", (e) => onMenu(e.payload)),
       listen<string[]>("fs-changed", (e) => onFsChanged(e.payload)),
-      listen<string[]>("open-paths", (e) => e.payload.forEach(openPath)),
+      listen<string[]>("open-paths", (e) => e.payload.forEach((p) => openPath(p))),
       listen("app-close-requested", () => closeApp()),
     ];
     if (inTauri) {
@@ -124,6 +126,7 @@ export default function Shell() {
     }
     (async () => {
       await boot();
+      await initAgents().catch((e) => console.error("agents", e));
       for (const p of await ipc.takePendingOpens()) await openPath(p);
       if (SELFTEST) runSelftest();
     })();
@@ -435,6 +438,7 @@ function TabBar() {
         >
           <span className="ellipsis">{tab.title}</span>
           <span className="tab-end">
+            {tab.agentDot && <span className="agent-dot" title={t("agent.badge")} />}
             {tab.save === "error" ? <span className="err-dot" /> : tab.save !== "saved" ? <span className="dot" /> : null}
             <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }} title={t("tab.close")}>{Icon.close}</button>
           </span>
@@ -511,7 +515,7 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
   const tab = useShell((s) => s.tabs.find((x) => x.path === s.active));
   if (!tab) return <Welcome />;
   const session = sessions.get(tab.path);
-  const dismiss = () => setState((s) => ({ tabs: s.tabs.map((x) => (x.path === tab.path ? { ...x, banner: undefined } : x)) }));
+  const dismiss = () => setState((s) => ({ tabs: s.tabs.map((x) => (x.path === tab.path ? { ...x, banner: undefined, bannerAction: undefined } : x)) }));
   return (
     <div className="editor">
       {tab.missing ? (
@@ -524,11 +528,16 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
       ) : tab.banner ? (
         <div className="banner">
           <span>{tab.banner}</span>
+          {tab.bannerAction && <button className="banner-action" onClick={tab.bannerAction.run}>{tab.bannerAction.label}</button>}
           <button className="icon" onClick={dismiss}>{Icon.close}</button>
         </div>
       ) : null}
       {tab.phase === "ready" && session ? (
-        <Editor session={session} theme={theme} lang={lang} />
+        <>
+          <Editor session={session} theme={theme} lang={lang} />
+          <AgentBar tab={tab} />
+          <CommentPopover path={tab.path} />
+        </>
       ) : (
         <div className="placeholder">
           {tab.phase === "error" ? (
@@ -545,6 +554,87 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+// ── Agent ──────────────────────────────────────────────
+
+function agentStatus(a: AgentView) {
+  if (a.status === "waiting") return t("agent.waiting");
+  if (a.status === "working") return a.tool && /^(read|render|list|get_)/.test(a.tool) ? t("agent.reading") : t("agent.working");
+  return t("agent.idle");
+}
+
+/** 画布底部：哪些 Agent 在这张图上、未处理的批注、批注（C）和「发回给 Agent」。只在有 Agent 碰过这张图或有批注时出现 */
+function AgentBar({ tab }: { tab: Tab }) {
+  const t = useT();
+  const agents = useShell((s) => s.agents);
+  const here = agents.filter((a) => a.files.includes(tab.path));
+  const comments = tab.comments ?? 0;
+  if (!here.length && !comments) return null;
+  const waiting = here.filter((a) => a.status === "waiting");
+  const session = sessions.get(tab.path);
+  return (
+    <div className="agent-bar">
+      {here.map((a) => (
+        <span key={a.id} className={`agent-chip ${a.status}`} title={a.files[0]}>
+          <i />
+          <b>{a.name}</b>
+          <span className="muted">{agentStatus(a)}</span>
+        </span>
+      ))}
+      {comments > 0 && (
+        <button className="link" title={t("agent.nextComment")} onClick={() => nextComment(tab.path)}>
+          {t("agent.comments", { n: comments })}
+        </button>
+      )}
+      <button className="link" title={t("agent.commentHint")} onClick={() => session && startComment(session)}>
+        {t("agent.comment")}
+        <kbd>C</kbd>
+      </button>
+      <button className={`send ${waiting.length ? "primary" : ""}`} title={t("agent.sendHint")} onClick={() => sendToAgent(tab.path)}>
+        {waiting.length === 1 ? t("agent.sendTo", { name: waiting[0].name }) : t("agent.send")}
+      </button>
+    </div>
+  );
+}
+
+/** 按 C 弹出的批注输入框：↩ 保存，⇧↩ 换行，Esc 取消 */
+function CommentPopover({ path }: { path: string }) {
+  const t = useT();
+  const draft = useShell((s) => (s.commentDraft?.path === path ? s.commentDraft : null));
+  const [text, setText] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    setText("");
+    if (draft) requestAnimationFrame(() => ref.current?.focus());
+  }, [draft]);
+  if (!draft) return null;
+  const host = document.querySelector(".editor")?.getBoundingClientRect();
+  const left = Math.min(Math.max(8, draft.left - (host?.left ?? 0)), (host?.width ?? 800) - 288);
+  const top = Math.min(Math.max(8, draft.top - (host?.top ?? 0)), (host?.height ?? 600) - 150);
+  const cancel = () => setState({ commentDraft: null });
+  return (
+    <div className="comment-pop" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
+      <textarea
+        ref={ref}
+        value={text}
+        placeholder={t("comment.placeholder")}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Escape") cancel();
+          else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+            e.preventDefault();
+            commitComment(text);
+          }
+        }}
+      />
+      <div className="comment-foot">
+        <span className="muted small">{draft.targets.length ? t("comment.targets", { n: draft.targets.length }) : t("comment.free")} · {t("comment.hint")}</span>
+        <button disabled={!text.trim()} onClick={() => commitComment(text)}>{t("comment.save")}</button>
+      </div>
     </div>
   );
 }
@@ -689,6 +779,7 @@ function SettingsDialog() {
           </select>
         </div>
         {inTauri && <UpdateSettings />}
+        <AgentSettings />
       </div>
     </div>
   );
@@ -721,6 +812,62 @@ function UpdateSettings() {
         <span>{version ? t("settings.version", { version }) : "Excalidesk"}</span>
         <button disabled={checking} onClick={() => void checkNow()}>{checking ? t("settings.checking") : t("settings.checkNow")}</button>
       </div>
+    </>
+  );
+}
+
+/** 设置 → Agent：开关、接入命令（一键拷贝）、现在连着谁 */
+function AgentSettings() {
+  const t = useT();
+  const agents = useShell((s) => s.agents);
+  const [info, setInfo] = useState<{ exe: string; enabled: boolean } | null>(null);
+  const [copied, setCopied] = useState("");
+  useEffect(() => {
+    ipc.mcpInfo().then(setInfo, () => {});
+  }, []);
+  if (!info) return null;
+  const exe = info.exe.includes(" ") ? `"${info.exe}"` : info.exe;
+  const cmds: [string, string][] = [
+    ["Claude Code", `claude mcp add excalidesk -s user -- ${exe} --mcp`],
+    ["Codex", `codex mcp add excalidesk -- ${exe} --mcp`],
+  ];
+  const copy = async (k: string, text: string) => {
+    await ipc.copyText(text).catch(() => navigator.clipboard?.writeText(text));
+    setCopied(k);
+    setTimeout(() => setCopied(""), 1500);
+  };
+  const sep = getState().lang === "zh" ? "、" : ", ";
+  return (
+    <>
+      <label className="setting">
+        <span>
+          {t("settings.agents")}
+          <span className="setting-desc">{t("settings.agentsDesc")}</span>
+        </span>
+        <input
+          type="checkbox"
+          checked={info.enabled}
+          onChange={async (e) => {
+            const on = e.target.checked;
+            await ipc.mcpSetEnabled(on);
+            setInfo({ ...info, enabled: on });
+          }}
+        />
+      </label>
+      {info.enabled && (
+        <div className="setting-block">
+          <span className="setting-desc">{t("settings.agentsConnect")}</span>
+          {cmds.map(([k, cmd]) => (
+            <div key={k} className="copy-line">
+              <span className="copy-label">{k}</span>
+              <code className="ellipsis selectable" title={cmd}>{cmd}</code>
+              <button onClick={() => copy(k, cmd)}>{copied === k ? t("settings.copied") : t("settings.copy")}</button>
+            </div>
+          ))}
+          <span className="setting-desc">{agents.length ? t("settings.agentsConnected", { names: agents.map((a) => a.name).join(sep) }) : t("settings.agentsNone")}</span>
+          <span className="setting-desc">{t("settings.agentsChannels")}</span>
+        </div>
+      )}
     </>
   );
 }

@@ -37,7 +37,18 @@ export type Tab = {
   missing?: boolean;
   /** 开始打开的时间：打开太久时提示可能在等 iCloud 下载 */
   openedAt?: number;
+  /** 未处理的批注数 */
+  comments?: number;
+  /** 横幅上的按钮（撤销 Agent 修改等） */
+  bannerAction?: { label: string; run: () => void };
+  /** Agent 在后台改过、用户还没看 */
+  agentDot?: boolean;
 };
+
+/** 连着的 Agent（Rust 侧 mcp::host::AgentView） */
+export type AgentView = { id: number; name: string; status: "idle" | "working" | "waiting"; tool: string | null; path: string | null; files: string[]; since: number; last: number };
+/** 批注输入框：屏幕坐标 + 指向的元素 */
+export type CommentDraft = { path: string; left: number; top: number; targets: string[]; scene: { x: number; y: number } };
 
 /** 等用户处理的提示（装好的更新等重启）：不自动消失，普通 toast 也顶不掉它 */
 export type Prompt = { id: string; msg: string; action?: { label: string; run: () => void } };
@@ -63,6 +74,8 @@ export type ShellState = {
   /** 实际生效的界面语言 */
   lang: "zh" | "en";
   settingsOpen: boolean;
+  agents: AgentView[];
+  commentDraft: CommentDraft | null;
 };
 
 let state: ShellState = {
@@ -73,6 +86,8 @@ let state: ShellState = {
   settings: loadSettings(),
   lang: effectiveLang(loadSettings()),
   settingsOpen: false,
+  agents: [],
+  commentDraft: null,
 };
 
 export function updateSettings(patch: Partial<Settings>) {

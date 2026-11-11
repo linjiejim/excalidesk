@@ -3,6 +3,7 @@ import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
 import { t, tErr } from "./i18n";
 import { basename, dirname, inTauri, ipc, isICloud } from "./ipc";
 import { DocSession } from "./session";
+import { isCommentLike, type El } from "./elements";
 import { getState, setState, toast, updateTab } from "./store";
 
 export const sessions = new Map<string, DocSession>();
@@ -83,22 +84,23 @@ export async function moveRoot(from: string, target: string, below: boolean) {
 
 // ── 标签页 ─────────────────────────────────────────────
 
-export async function openPath(requested: string) {
+/** background：Agent 打开的图在后台标签里，不抢走用户正在看的那张（没有打开的图时照常切过去） */
+export async function openPath(requested: string, opts: { background?: boolean } = {}) {
   const path = await ipc.realPath(requested);
   if (!path.endsWith(".excalidraw")) {
     toast(t("toast.onlyExcalidraw"));
     return;
   }
   if (sessions.has(path)) {
-    await activate(path);
+    if (!opts.background) await activate(path);
     return;
   }
   const s = new DocSession(path);
   sessions.set(path, s);
   setState((st) => ({
-    tabs: [...st.tabs, { path, title: basename(path), phase: "loading", save: "saved", elements: 0, openedAt: Date.now() }],
+    tabs: [...st.tabs, { path, title: basename(path), phase: "loading", save: "saved", elements: 0, openedAt: Date.now(), agentDot: !!opts.background && !!st.active }],
   }));
-  await activate(path);
+  if (!opts.background || !getState().active) await activate(path);
   // iCloud 里还没下载的文件：先拿到状态，界面显示「正在下载」而不是「正在打开」
   if (isICloud(path)) await refreshSync(path).catch(() => {});
   try {
@@ -119,7 +121,7 @@ export async function activate(path: string) {
     prev.saveViewport();
     prev.flush();
   }
-  setState({ active: path, history: false });
+  setState((s) => ({ active: path, history: false, commentDraft: null, tabs: s.tabs.map((t) => (t.path === path && t.agentDot ? { ...t, agentDot: false } : t)) }));
 }
 
 export async function closeTab(path: string | null) {
@@ -287,7 +289,8 @@ export async function exportActive(kind: "png" | "svg", target?: string) {
   const { active } = getState();
   const s = active ? sessions.get(active) : null;
   if (!s?.api) return;
-  const elements = s.api.getSceneElements();
+  // 给 Agent 的批注不导出
+  const elements = s.api.getSceneElements().filter((e: El) => !isCommentLike(e));
   const appState = { ...s.api.getAppState(), exportBackground: true, exportWithDarkMode: false };
   const files = s.api.getFiles();
   const path = target ?? (await ipc.pickSavePath(basename(s.path), kind));

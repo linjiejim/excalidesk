@@ -27,6 +27,9 @@ tauri-plugin-updater = "2"
 notify = "8"
 flate2 = "1"
 sha2 = "0.10"
+rmcp = { version = "3.9", default-features = false, features = ["server", "transport-io"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "macros", "rt-multi-thread"] }
+schemars = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

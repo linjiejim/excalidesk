@@ -19,6 +19,7 @@ mod doc;
 mod fps;
 mod history;
 mod icloud;
+pub mod mcp;
 mod menu;
 mod workspace;
 
@@ -42,6 +43,8 @@ struct Opts {
     icloud_probe: bool,
     /// 基准模式下也用正式窗口样式，用来测它对渲染的影响
     vibrant: bool,
+    /// MCP 端到端自测：Agent 一等反馈，前端就替用户加一条批注并点「发回」（bench/mcp-e2e.py）
+    mcp_selftest: bool,
 }
 
 fn parse_opts() -> Opts {
@@ -55,6 +58,7 @@ fn parse_opts() -> Opts {
         autoquit: false,
         icloud_probe: false,
         vibrant: false,
+        mcp_selftest: false,
     };
     for a in std::env::args().skip(1) {
         if let Some(v) = a.strip_prefix("--fps=") {
@@ -73,6 +77,8 @@ fn parse_opts() -> Opts {
             o.autoquit = true;
         } else if a == "--vibrant" {
             o.vibrant = true;
+        } else if a == "--mcp-selftest" {
+            o.mcp_selftest = true;
         } else if a == "--icloud-probe" {
             o.icloud_probe = true;
         }
@@ -607,13 +613,23 @@ pub fn run() {
             recent_remove, workspace_reorder, set_menu_lang,
             pick_open_file, pick_save_path, write_bytes, close_now, restart_now,
             bench_result, save_doc, opts, icloud::icloud_probe, selftest_dir, debug_read, debug_size, external_edit,
+            mcp::host::mcp_ready, mcp::host::mcp_reply, mcp::host::mcp_send, mcp::host::mcp_info, mcp::host::mcp_set_enabled,
         ])
         .setup(move |app| {
             let state_path = o.state.clone().unwrap_or_else(|| {
                 app.path().app_config_dir().unwrap_or_else(|_| std::env::temp_dir()).join("state.json")
             });
             app.manage(HistoryRoot(state_path.parent().map(|p| p.join("history")).unwrap_or_else(|| std::env::temp_dir().join("excalidesk-history"))));
-            app.manage(StateFile::load(state_path));
+            let state = StateFile::load(state_path.clone());
+            let mcp_on = !state.snapshot().mcp_disabled;
+            app.manage(state);
+            // MCP：Agent 通过 Unix socket 连进来（基准和老自测不开，免得 Agent 连到测试实例上）
+            let mcp_dir = state_path.parent().map(|p| p.join("mcp")).unwrap_or_else(|| std::env::temp_dir().join("excalidesk-mcp"));
+            let host = mcp::host::Host::new(app.handle().clone(), mcp_dir, mcp_on);
+            app.manage(host.clone());
+            if !o.bench && !o.selftest {
+                tauri::async_runtime::spawn(host.listen());
+            }
             app.set_menu(menu::build(app.handle(), "zh")?)?;
             app.on_menu_event(|app, ev| {
                 let _ = app.emit("menu", ev.id().0.clone());
@@ -623,6 +639,8 @@ pub fn run() {
                 format!("index.html?bench=1&env={}", o.env)
             } else if o.selftest {
                 "index.html?selftest=1".to_string()
+            } else if o.mcp_selftest {
+                "index.html?mcpselftest=1".to_string()
             } else {
                 "index.html".to_string()
             };

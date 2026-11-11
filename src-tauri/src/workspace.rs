@@ -20,6 +20,9 @@ pub struct Persisted {
     /// 视口不写进 .excalidraw：只是滚动一下不该改文件、触发 iCloud 上传
     #[serde(default)]
     pub viewports: HashMap<String, Viewport>,
+    /// 设置 → Agent：关掉后拒绝 MCP 调用
+    #[serde(default, rename = "mcpDisabled")]
+    pub mcp_disabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy)]

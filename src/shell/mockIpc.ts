@@ -76,4 +76,10 @@ export const mockIpc = {
   debugSize: () => ok(0),
   externalEdit: () => ok(undefined),
   benchResult: () => ok(""),
+  // 浏览器预览：假装有一个 Claude Code 在等反馈（?agents=0 关掉）
+  mcpReady: () => ok(new URLSearchParams(location.search).get("agents") === "0" ? [] : [{ id: 1, name: "Claude Code", status: "waiting" as const, tool: "wait_for_feedback", path: null, files: seed, since: Date.now(), last: Date.now() }]),
+  mcpReply: () => ok(undefined),
+  mcpSend: () => ok({ woke: ["Claude Code"], pushed: [] as string[] }),
+  mcpInfo: () => ok({ exe: "/Applications/Excalidesk.app/Contents/MacOS/excalidesk", socket: "", enabled: true }),
+  mcpSetEnabled: () => ok(undefined),
 };

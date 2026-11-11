@@ -5,6 +5,7 @@ import { Excalidraw, MainMenu } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { DocSession } from "./session";
 import { exportActive, toggleHistory } from "./actions";
+import { startComment } from "./agent";
 import { t } from "./i18n";
 
 const UI_OPTIONS = {
@@ -15,9 +16,23 @@ function EditorImpl({ session, theme, lang }: { session: DocSession; theme: "lig
   const initialData = useMemo(() => session.initialData(), [session]);
   const onApi = useCallback((api: unknown) => session.attach(api), [session]);
   useEffect(() => () => session.attach(null), [session]);
+  // C：给选中的元素加批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按不冲突）
+  const onKey = useCallback(
+    (e: React.KeyboardEvent) => {
+      session.userInput();
+      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || e.nativeEvent.isComposing) return;
+      if (e.code !== "KeyC" && e.key.toLowerCase() !== "c") return;
+      if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable='true']")) return;
+      if (session.api?.getAppState().editingTextElement) return;
+      e.preventDefault();
+      e.stopPropagation();
+      startComment(session);
+    },
+    [session],
+  );
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
-    <div className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={session.userInput}>
+    <div className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}

@@ -8,6 +8,7 @@ import { CaptureUpdateAction, getSceneVersion, reconcileElements, restoreAppStat
 import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
+import { isOpenComment, nonce as newNonce } from "./elements";
 
 type El = { id: string; version: number; versionNonce: number; isDeleted?: boolean; [k: string]: unknown };
 type Files = Record<string, { id: string; [k: string]: unknown }>;
@@ -16,7 +17,7 @@ type Api = any;
 const PERSISTED_APPSTATE = ["viewBackgroundColor", "gridSize", "gridStep", "gridModeEnabled"] as const;
 const persisted = (a: Record<string, unknown>) => Object.fromEntries(PERSISTED_APPSTATE.map((k) => [k, a[k]]));
 const keyOf = (e: El) => `${e.version}:${e.versionNonce}`;
-const nonce = () => (Math.random() * 2 ** 31) | 0;
+const nonce = newNonce;
 /** 兜底：挂载后这段时间内、用户还没动过画布时，Excalidraw 自己做的规整不算改动 */
 const SETTLE_MS = 4000;
 
@@ -57,9 +58,14 @@ export class DocSession {
   private viewportTimer = 0;
   private settleUntil = 0;
   private candidates: Api[] = [];
+  /** apply() 时画布已挂载但 api 还没确认：等第一次 onChange 确认后再推上去，否则旧场景会把它盖掉 */
+  private needsPush = false;
 
   debounceMs = 800;
   maxWaitMs = 5000;
+  /** 最近一次 Agent 修改：改之前每个元素的样子（null = Agent 新建的），「撤销」用 */
+  lastAgent: { agent: string; prev: Map<string, El | null> } | null = null;
+
   /** 自测用：最近一次保存发出的元素数和字节数 */
   lastSave = { upserts: 0, bytes: 0, files: 0, full: false };
   saves = 0;
@@ -68,10 +74,23 @@ export class DocSession {
     this.path = path;
   }
 
+  // 先声明 loaded，loading 的初始化才不会被它的默认值覆盖
+  private loaded!: () => void;
+  /** 打开完（成功或失败）才 resolve，从建出会话那一刻就有：Agent 操作要等它，不然读到的是空画布 */
+  readonly loading = new Promise<void>((r) => (this.loaded = r));
+
   async load() {
+    try {
+      await this.doLoad();
+    } finally {
+      this.loaded();
+    }
+  }
+
+  private async doLoad() {
     updateTab(this.path, { phase: getState().sync[this.path]?.dataless ? "downloading" : "loading" });
     this.adopt(parse(await ipc.openDoc(this.path)));
-    updateTab(this.path, { phase: "ready", save: "saved", elements: this.liveCount() });
+    updateTab(this.path, { phase: "ready", save: "saved", elements: this.liveCount(), comments: this.openComments() });
   }
 
   /** 用磁盘内容作为基线 */
@@ -130,8 +149,22 @@ export class DocSession {
     return n;
   }
 
+  openComments() {
+    let n = 0;
+    for (const e of this.elements) if (isOpenComment(e as any)) n++;
+    return n;
+  }
+
   onChange = (elements: readonly El[], appState: Record<string, unknown>, files: Files) => {
     this.confirmApi(elements);
+    if (this.needsPush && this.api) {
+      this.needsPush = false;
+      if (elements !== this.elements) {
+        this.api.addFiles(Object.values(this.files));
+        this.api.updateScene({ elements: this.elements, captureUpdate: CaptureUpdateAction.NEVER });
+        return;
+      }
+    }
     this.elements = elements;
     this.appState = appState;
     this.files = files;
@@ -207,13 +240,18 @@ export class DocSession {
       this.fullSync = false;
       // 保存期间又有改动：保持 dirty，交给下一轮
       this.dirty = this.lastVersion !== versionAtStart;
-      updateTab(this.path, { save: this.dirty ? "dirty" : "saved", savedAt: Date.now(), saveError: undefined, elements: this.liveCount() });
+      updateTab(this.path, { save: this.dirty ? "dirty" : "saved", savedAt: Date.now(), saveError: undefined, elements: this.liveCount(), comments: this.openComments() });
       if (this.dirty) this.markDirty();
     } catch (e) {
       updateTab(this.path, { save: "error", saveError: String(e) });
       // 5 秒后重试
       this.maxWait = window.setTimeout(() => this.flush(), 5000);
     }
+  }
+
+  /** 画布上的全部元素（含墓碑）、appState、图片：挂载中以 Excalidraw 为准 */
+  snapshot() {
+    return { ...this.current(), files: (this.api ? this.api.getFiles() : this.files) as Files };
   }
 
   private current() {
@@ -230,6 +268,8 @@ export class DocSession {
     if (this.api) {
       this.api.addFiles(Object.values(files));
       this.api.updateScene({ elements: next, captureUpdate: undoable ? CaptureUpdateAction.IMMEDIATELY : CaptureUpdateAction.NEVER });
+    } else {
+      this.needsPush = true;
     }
   }
 
@@ -270,15 +310,72 @@ export class DocSession {
     this.apply(next, remote.files, wasDirty);
     const label = changed ? t("banner.externalN", { n: changed }) : t("banner.external");
     if (wasDirty) {
-      updateTab(this.path, { banner: t("banner.merged", { label }), elements: this.liveCount() });
+      updateTab(this.path, { bannerAction: undefined, banner: t("banner.merged", { label }), elements: this.liveCount(), comments: this.openComments() });
       this.dirty = false;
       this.markDirty();
       await this.flush();
       return "merged";
     }
     this.dirty = false;
-    updateTab(this.path, { banner: t("banner.replaced", { label }), save: "saved", elements: this.liveCount() });
+    updateTab(this.path, { bannerAction: undefined, banner: t("banner.replaced", { label }), save: "saved", elements: this.liveCount(), comments: this.openComments() });
     return "replaced";
+  }
+
+  /**
+   * Agent 修改前：等手上的保存做完，留一份历史。之后调用方要**同步地**读画布、算出 patch、applyAgent，
+   * 中间不能再 await，这样算 patch 用的就是放进画布那一刻的样子，不会盖掉用户刚做的编辑。
+   */
+  async beginAgent() {
+    if (this.inflight) await this.inflight;
+    await ipc.historySnapshot(this.path, "before_agent").catch(() => {});
+  }
+
+  /**
+   * Agent 的修改：记下改之前的样子（撤销用），作为一次可撤销的修改放进画布，立即保存。
+   * patch 只含这次新建或改过的元素。合并到画布之前没有 await（见 beginAgent）。
+   */
+  async applyAgent(patch: readonly El[], files: Files, agent: string) {
+    const cur = this.current().elements;
+    const before = new Map(cur.map((e) => [e.id, e]));
+    const byId = new Map(patch.map((e) => [e.id, e]));
+    const prev = new Map<string, El | null>();
+    for (const id of byId.keys()) prev.set(id, before.get(id) ?? null);
+    const next = [...cur.map((e) => byId.get(e.id) ?? e), ...patch.filter((e) => !before.has(e.id))];
+    // 补齐 fractional index、修好绑定（新元素没有 index）
+    const restored = restoreElements(next as any, null, { repairBindings: true }) as unknown as El[];
+    this.lastAgent = { agent, prev };
+    this.lastVersion = getSceneVersion(restored as any);
+    this.apply(restored, files, true);
+    this.settleUntil = 0;
+    this.markDirty();
+    await this.flush();
+    updateTab(this.path, { elements: this.liveCount(), comments: this.openComments() });
+  }
+
+  /** 撤销最近一次 Agent 修改：新建的标成删除，改过的恢复原样（版本号抬高，保证合并时胜出） */
+  async undoAgent() {
+    const rec = this.lastAgent;
+    if (!rec) return false;
+    this.lastAgent = null;
+    if (this.inflight) await this.inflight;
+    const cur = this.current().elements;
+    const seen = new Set<string>();
+    const next: El[] = cur.map((e) => {
+      if (!rec.prev.has(e.id)) return e;
+      seen.add(e.id);
+      const p = rec.prev.get(e.id);
+      const version = Math.max(e.version, p?.version ?? 0) + 1;
+      return p ? { ...p, version, versionNonce: nonce() } : { ...e, isDeleted: true, version, versionNonce: nonce() };
+    });
+    // Agent 删掉、之后又被清理出列表的元素：按原样放回
+    for (const [id, p] of rec.prev) if (p && !seen.has(id)) next.push({ ...p, version: p.version + 1, versionNonce: nonce() });
+    this.lastVersion = getSceneVersion(next as any);
+    this.apply(next, {}, true);
+    this.settleUntil = 0;
+    this.markDirty();
+    await this.flush();
+    updateTab(this.path, { elements: this.liveCount(), comments: this.openComments() });
+    return true;
   }
 
   /** 文件被移走后，按原路径重新存一份 */
@@ -320,7 +417,7 @@ export class DocSession {
     await ipc.conflictsResolve(this.path);
     const devices = [...new Set(versions.map((v) => v.device).filter(Boolean))].join(", ");
     const from = devices ? t("banner.device", { d: devices }) : t("banner.otherDevices");
-    updateTab(this.path, { banner: t("banner.conflicts", { n: versions.length, from }), elements: this.liveCount() });
+    updateTab(this.path, { bannerAction: undefined, banner: t("banner.conflicts", { n: versions.length, from }), elements: this.liveCount(), comments: this.openComments() });
     return versions.length;
   }
 
@@ -343,7 +440,7 @@ export class DocSession {
     this.settleUntil = 0;
     this.markDirty();
     await this.flush();
-    updateTab(this.path, { banner: t("banner.restored"), elements: this.liveCount() });
+    updateTab(this.path, { bannerAction: undefined, banner: t("banner.restored"), elements: this.liveCount(), comments: this.openComments() });
   }
 
   isDirty() {

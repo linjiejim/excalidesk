@@ -39,15 +39,21 @@ Agent 没在等时点「发回」：先记下来，下次 `wait_for_feedback` / 
 | `open_drawing` | 打开或新建（`create` + 可选 `dir`），默认后台标签 |
 | `read_drawing` | 紧凑 JSON：frames、元素 `{id,type,x,y,w,h,text,…,by}`、批注；并把当前状态记为「看过」 |
 | `render_drawing` | 整张 / 一个 frame / 几个元素 → PNG |
-| `draw` | Excalidraw skeleton 格式加元素：`frame` 自动排到已有内容右边，`style` 选 clean / sketch，箭头按 id 绑定 |
+| `draw` | Excalidraw skeleton 格式加元素：`frame` 自动排到已有内容右边，`style` 选 clean / sketch，箭头按 id 绑定；元素带 `"order":"back"` 放到最底层（底板、泳道）；删掉的元素的 id 可以再用 |
 | `draw_mermaid` | Mermaid → 可编辑元素（流程图、时序图等） |
-| `update_elements` | 改位置、尺寸、文字 / 标签、颜色样式、链接、frame 名；连着的箭头跟着重新走线 |
+| `update_elements` | 改位置、尺寸、文字 / 标签、颜色样式、箭头头部、图层（`order`: front / back）、链接、frame 名；连着的箭头跟着重新走线；没生效的字段放在 `ignored` 里并说明原因 |
 | `delete_elements` | 删元素（标签、frame 内容一起）；用户批注不许删 |
 | `get_feedback` | 上次看过之后用户的批注和改动 |
 | `wait_for_feedback` | 等用户点「发回」，返回 get_feedback 的内容 + PNG；超时返回「还没有反馈」 |
 | `resolve_comments` | 标记批注已处理并回复 |
 
 写操作和用户自己的编辑走同一条保存路径（增量、原子写、历史留档），标签上会出现横幅「Claude Code 改了 n 个元素 · 撤销」。
+
+## 图层和「没生效」
+
+- 数组顺序就是图层顺序（从下到上）。`order` 让元素连同标签挪到最下或最上；在 frame 里只在这个 frame 的范围里挪，不跑出 frame 那一段。挪过的元素抬版本、重新分配 fractional index；撤销时连顺序一起复原。
+- frame 没有填充：给 frame 设 `backgroundColor` 不会生效，Agent 会在 `ignored` 里看到提示：在 frame 里画个矩形，加 `order: "back"`。不认识的字段、给非箭头设箭头头部、给非 frame 设 `name` 也一样，不再静默忽略。
+- 删除是软删除（文件里留着 `isDeleted` 的记录），所以删掉的 id 仍在文件里。`draw` 允许复用这样的 id：新元素的版本压过删除记录（合并时胜出），并放在最上面。
 
 ## 多个 Agent
 
@@ -83,7 +89,7 @@ Agent ──stdio MCP──▶ excalidesk --mcp ──Unix socket──▶ Excal
 ## 验证
 
 - `cargo test --lib mcp`：9 个（场景简化、差异、基线吸收、参数解包、新文件夹路径解析、协议往返）。
-- `bench/mcp-e2e.py`：真 App + 真 `--mcp` 进程，临时工作区和单独 socket，32 步全过。App 以 `--mcp-selftest` 启动，Agent 一进入等待，前端就替用户给 id 为 `login` 的元素加批注并点「发回」（只演一次）。覆盖：握手、新建、画（含元素被编码成字符串）、重复 id、Mermaid、读、渲染、外部修改算用户改动、等待并收到批注、两个 Agent 各自收到同一次发回、改图、加 / 去标签、不许删批注、处理批注、Agent 自己的改动不回报、工作区外拒绝（不建文件夹）、同时新建同名图、两个 Agent 并行。
+- `bench/mcp-e2e.py`：真 App + 真 `--mcp` 进程，临时工作区和单独 socket，43 步全过（新加了图层、复用 id、`ignored`、箭头头部 12 步，核对文件里的数组顺序和 index 一致）。App 以 `--mcp-selftest` 启动，Agent 一进入等待，前端就替用户给 id 为 `login` 的元素加批注并点「发回」（只演一次）。覆盖：握手、新建、画（含元素被编码成字符串）、重复 id、Mermaid、读、渲染、外部修改算用户改动、等待并收到批注、两个 Agent 各自收到同一次发回、改图、加 / 去标签、不许删批注、处理批注、Agent 自己的改动不回报、工作区外拒绝（不建文件夹）、同时新建同名图、两个 Agent 并行。
 - 浏览器预览里用 `window.__agent` 验过并发场景：Agent 写入途中用户加元素、挪同一个元素、删 frame 时里面的批注、同一批先加标签再挪容器、操作途中关掉图。
 - Codex 审了 3 轮（`codex review --uncommitted`，后两轮只看修复）：第 1 轮 9 条、第 2 轮 6 条、第 3 轮 1 条，全部修了；没有留下未修的。
 - 用真 Agent 跑过一轮：`codex exec`（临时 `-c mcp_servers.excalidesk…`，没改全局配置）画了手机登录页 → 等反馈 → 收到「make the button green」→ 改绿 → 回复并处理批注。它第一次把元素编码成 JSON 字符串传进来被拒，之后服务端改成自动解包。

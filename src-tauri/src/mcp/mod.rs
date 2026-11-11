@@ -137,7 +137,7 @@ pub struct MermaidArgs {
 #[derive(Deserialize, JsonSchema, Serialize)]
 pub struct UpdateArgs {
     pub path: String,
-    /// [{"id": "...", ...fields to change}]. Fields: x, y, width, height (scene coordinates), text (a text element's text, or a shape's/arrow's label), strokeColor, backgroundColor, fillStyle, strokeStyle, strokeWidth, roughness, opacity, fontSize, link, name (frames), locked. Moving a shape moves its label; moving a frame moves what's inside.
+    /// [{"id": "...", ...fields to change}]. Fields: x, y, width, height (scene coordinates), text (a text element's text, or a shape's/arrow's label), strokeColor, backgroundColor, fillStyle, strokeStyle, strokeWidth, roughness, opacity, fontSize, link, name (frames), locked, startArrowhead / endArrowhead (arrows and lines: "arrow", "triangle", "dot", "bar", null…), order ("back" sends it behind everything else in its frame, "front" brings it on top). Moving a shape moves its label; moving a frame moves what's inside. Frames have no fill: for a background, draw a rectangle inside and give it order "back". Fields that had no effect come back in `ignored` with the reason.
     pub updates: Vec<Value>,
 }
 
@@ -205,7 +205,8 @@ Elements use Excalidraw's skeleton format. Coordinates are relative to the origi
 - Shapes: {"type":"rectangle"|"ellipse"|"diamond", "id":"login_btn", "x":0, "y":0, "width":160, "height":48, "label":{"text":"Sign in","fontSize":16}, "backgroundColor":"#a5d8ff", "strokeColor":"#1971c2", "fillStyle":"solid", "strokeStyle":"solid"|"dashed"|"dotted", "roundness":{"type":3}}
 - Text: {"type":"text", "x":0, "y":0, "text":"Title", "fontSize":28, "textAlign":"left"}
 - Arrows and lines: {"type":"arrow"|"line", "x":0, "y":0, "points":[[0,0],[200,0]], "start":{"id":"a"}, "end":{"id":"b"}, "label":{"text":"yes"}, "endArrowhead":"arrow"|null}. With both start and end ids you can leave out x, y and points; the arrow is drawn between the two shapes and stays attached.
-- Give elements short readable ids so you can update them later. Ids must be new in this drawing.
+- Layering: later elements are drawn on top. Add "order":"back" to an element to put it behind everything else in its frame (backgrounds, panels, swimlanes). Frames themselves have no fill.
+- Give elements short readable ids so you can update them later. Ids must not belong to a live element in this drawing (ids of deleted elements can be reused).
 Colors: stroke #1e1e1e #e03131 #2f9e44 #1971c2 #f08c00 #9c36b5; fill #ffc9c9 #b2f2bb #a5d8ff #ffec99 #eebefa #e9ecef.
 Returns the ids created. Call render_drawing to check the result."##;
 
@@ -244,7 +245,7 @@ pub fn tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "update_elements",
-            description: "Change existing elements: position, size, text or label, colors and style, link, frame name. The user can undo it.",
+            description: "Change existing elements: position, size, text or label, colors and style, arrowheads, layer order (front / back), link, frame name. The user can undo it. Returns `ignored` for any field that had no effect, with the reason.",
             schema: schema::<UpdateArgs>,
             read_only: false,
         },

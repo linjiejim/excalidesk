@@ -233,10 +233,13 @@ async function draw(a: DrawArgs) {
   const { elements: cur } = snap(s);
   const byId = new Map(cur.map((e) => [e.id, e]));
   const batch = new Set<string>();
+  const back: string[] = [];
   for (const e of a.elements) {
     if (!e || typeof e !== "object" || typeof e.type !== "string") throw new Error("every element needs a `type`");
+    if (e.order != null && e.order !== "back" && e.order !== "front") throw new Error(`"order" is "back" or "front", not ${JSON.stringify(e.order)}`);
     if (e.id != null) {
-      if (byId.has(e.id)) throw new Error(`id "${e.id}" is already used in this drawing; pick another id, or use update_elements to change it`);
+      // 删掉的元素在文件里还留着（标成已删除）：它的 id 可以再用
+      if (byId.has(e.id) && !byId.get(e.id)!.isDeleted) throw new Error(`id "${e.id}" is already used in this drawing; pick another id, or use update_elements to change it`);
       if (batch.has(e.id)) throw new Error(`id "${e.id}" appears twice`);
       batch.add(e.id);
     }
@@ -244,7 +247,12 @@ async function draw(a: DrawArgs) {
   const frameEl = a.frame ? findFrame(cur, a.frame) : undefined;
   const o = origin(cur, a.at, frameEl);
   const sk: any[] = styled(
-    a.elements.map((e) => ({ ...structuredClone(e), id: e.id ?? randomId(), x: (Number(e.x) || 0) + o.x, y: (Number(e.y) || 0) + o.y })),
+    a.elements.map((e) => {
+      const { order, ...rest } = structuredClone(e);
+      const id = e.id ?? randomId();
+      if (order === "back") back.push(id);
+      return { ...rest, id, x: (Number(e.x) || 0) + o.x, y: (Number(e.y) || 0) + o.y };
+    }),
     a.style,
   );
 
@@ -285,8 +293,15 @@ async function draw(a: DrawArgs) {
   }
   const placed = frameUp([...out.values()], a.frame, frameEl);
   for (const e of placed.changed) existing.set(e.id, e);
-  const created = placed.newEls.map((e) => stamp(e, a.agent));
-  await s.applyAgent([...existing.values(), ...created], {}, a.agent);
+  // 复用的 id：版本压过那条删除记录（合并时才赢）。删除记录还占着原来的位置，
+  // 所以这一批新画的（不只是复用的）都按请求里的先后重新放到最上面，保证「后画的在上面」
+  const reused = placed.newEls.some((e) => byId.get(e.id)?.isDeleted);
+  const created = placed.newEls.map((e) => {
+    const old = byId.get(e.id);
+    return stamp(old?.isDeleted ? { ...e, version: Math.max(e.version, old.version) + 1 } : e, a.agent);
+  });
+  const front = reused ? sk.map((e) => e.id).filter((id) => !back.includes(id)) : [];
+  await s.applyAgent([...existing.values(), ...created], {}, a.agent, back.length || front.length ? { back, front } : undefined);
   banner(s, a.agent, t("agent.drew", { n: shapeCount(created) }));
   const box = unionBox(created)!;
   return {
@@ -330,6 +345,9 @@ async function mermaid(a: { path: string; agent: string; mermaid: string; frame?
 }
 
 const STYLE_KEYS = ["strokeColor", "backgroundColor", "fillStyle", "strokeStyle", "strokeWidth", "roughness", "opacity", "link", "locked"];
+const ARROWHEADS = ["startArrowhead", "endArrowhead"];
+const UPDATE_KEYS = new Set(["id", "x", "y", "width", "height", "text", "fontSize", "name", "order", ...STYLE_KEYS, ...ARROWHEADS]);
+type Ignored = { id: string; fields: string[]; why: string };
 
 async function update(a: { path: string; agent: string; updates: any[] }) {
   if (!Array.isArray(a.updates) || !a.updates.length) throw new Error("`updates` is empty");
@@ -341,18 +359,43 @@ async function update(a: { path: string; agent: string; updates: any[] }) {
   const get = (id: string) => changed.get(id) ?? byId.get(id);
   const view = { get: (id: string) => get(id) } as unknown as Map<string, El>;
   const missing: string[] = [];
-  for (const u of a.updates) {
-    let el = u?.id ? get(u.id) : undefined;
+  // 没生效的字段要说出来，别让 Agent 以为改成功了
+  const ignored: Ignored[] = [];
+  // 同一个元素在一批里调了几次：最后一次算数
+  const sides = new Map<string, "back" | "front">();
+  for (const u0 of a.updates) {
+    let el = u0?.id ? get(u0.id) : undefined;
     if (!el || el.isDeleted) {
-      missing.push(String(u?.id));
+      missing.push(String(u0?.id));
       continue;
     }
-    if (isCommentLike(el)) throw new Error(`"${u.id}" is part of the user's comment; use resolve_comments instead`);
+    if (isCommentLike(el)) throw new Error(`"${u0.id}" is part of the user's comment; use resolve_comments instead`);
     // 改容器里的文字 = 改容器的标签
     if (el.type === "text" && el.containerId && get(el.containerId)) el = get(el.containerId)!;
+    const u = { ...u0 };
+    const drop = (keys: string[], why: string) => {
+      const hit = keys.filter((k) => k in u);
+      if (!hit.length) return;
+      hit.forEach((k) => delete u[k]);
+      ignored.push({ id: u0.id, fields: hit, why });
+    };
+    drop(Object.keys(u).filter((k) => !UPDATE_KEYS.has(k)), "not a field update_elements can change");
+    if (isFrame(el)) {
+      drop(["backgroundColor", "fillStyle"], 'frames have no fill; draw a rectangle inside the frame and give it order "back"');
+      drop(["text", "fontSize"], "a frame's title is its `name`");
+      drop(["order"], "frames can't be reordered; reorder the elements inside instead");
+    } else drop(["name"], "only frames have a `name`; use `text` for a shape's label");
+    if (el.type !== "arrow" && el.type !== "line") drop(ARROWHEADS, "only arrows and lines have arrowheads");
+    if ("order" in u) {
+      if (u.order === "back" || u.order === "front") {
+        sides.delete(el.id);
+        sides.set(el.id, u.order);
+      }
+      else drop(["order"], 'order is "back" or "front"');
+    }
     const patch: Record<string, any> = {};
-    for (const k of STYLE_KEYS) if (k in u) patch[k] = u[k];
-    if ("name" in u && isFrame(el)) patch.name = u.name;
+    for (const k of [...STYLE_KEYS, ...ARROWHEADS]) if (k in u) patch[k] = u[k];
+    if ("name" in u) patch.name = u.name;
     if ("width" in u) patch.width = Number(u.width);
     if ("height" in u) patch.height = Number(u.height);
     const dx = "x" in u ? Number(u.x) - el.x : 0;
@@ -404,10 +447,16 @@ async function update(a: { path: string; agent: string; updates: any[] }) {
   }
   if (changed.size) {
     // 新加的标签不在 cur 里，所以交出去的是 changed 本身
-    await s.applyAgent([...changed.values()], {}, a.agent);
+    const pick = (side: string) => [...sides].filter(([, v]) => v === side).map(([id]) => id);
+    await s.applyAgent([...changed.values()], {}, a.agent, sides.size ? { back: pick("back"), front: pick("front") } : undefined);
     banner(s, a.agent, t("agent.changed", { n: a.updates.length - missing.length }));
   }
-  return { ids: [...changed.keys()], updated: a.updates.map((u) => u?.id).filter((id) => id && !missing.includes(id)), missing };
+  return {
+    ids: [...changed.keys()],
+    updated: a.updates.map((u) => u?.id).filter((id) => id && !missing.includes(id)),
+    missing,
+    ...(ignored.length ? { ignored } : {}),
+  };
 }
 
 async function remove(a: { path: string; agent: string; ids: string[] }) {

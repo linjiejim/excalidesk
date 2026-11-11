@@ -198,6 +198,62 @@ try:
     fb = js(t)
     step("get_feedback：Agent 改的不回报给自己", fb["comments"] == [] and not any(fb["changes"].values()), fb["changes"])
 
+    # 图层顺序、复用删掉的 id、没生效的字段要报出来、箭头头部
+    _, t, _ = a.call("open_drawing", {"create": "layers"})
+    lp = js(t)["path"]
+
+    def stack(fid=None):
+        """文件里一个 frame 内（或不在 frame 里）的活元素，从下到上；按 index 排，同时核对数组顺序和 index 一致"""
+        els = [e for e in json.loads(Path(lp).read_text())["elements"] if not e.get("isDeleted")]
+        arr = [e["id"] for e in els if e.get("frameId") == fid and e["type"] != "frame"]
+        by_index = [e["id"] for e in sorted(els, key=lambda e: e["index"]) if e.get("frameId") == fid and e["type"] != "frame"]
+        return arr if arr == by_index else ["index 和数组顺序不一致", arr, by_index]
+
+    err, t, _ = a.call("draw", {"path": lp, "frame": "L", "style": "clean", "elements": [
+        {"type": "rectangle", "id": "c1", "x": 0, "y": 0, "width": 120, "height": 60, "label": {"text": "one"}},
+        {"type": "rectangle", "id": "c2", "x": 200, "y": 0, "width": 120, "height": 60},
+        {"type": "rectangle", "id": "bg", "x": -20, "y": -20, "width": 360, "height": 100, "backgroundColor": "#e9ecef", "fillStyle": "solid", "order": "back"},
+        {"type": "arrow", "id": "ln", "start": {"id": "c1"}, "end": {"id": "c2"}},
+    ]})
+    fid = js(t)["frame"] if not err else None
+    st = stack(fid)
+    step("draw：order back 放到 frame 最下面", not err and st[0] == "bg" and st.index("c1") < st.index("ln"), st)
+    err, t, _ = a.call("draw", {"path": lp, "elements": [{"type": "rectangle", "id": "zz", "x": 0, "y": 0, "width": 1, "height": 1, "order": "middle"}]})
+    step("draw：order 写错报错", err and "order" in t[0], t)
+
+    a.call("update_elements", {"path": lp, "updates": [{"id": "c1", "order": "front"}]})
+    st = stack(fid)
+    lab = next(e["id"] for e in json.loads(Path(lp).read_text())["elements"] if e.get("containerId") == "c1" and not e.get("isDeleted"))
+    step("update_elements：order front，标签跟着", st[-2:] == ["c1", lab], st)
+    a.call("update_elements", {"path": lp, "updates": [{"id": lab, "order": "back"}]})
+    st = stack(fid)
+    step("update_elements：对标签调 order 等于对容器", st[:2] == ["c1", lab], st)
+
+    err, t, _ = a.call("update_elements", {"path": lp, "updates": [{"id": fid, "backgroundColor": "#eee", "name": "L2"}, {"id": "c2", "foo": 1, "endArrowhead": "dot"}, {"id": "ln", "endArrowhead": "triangle", "startArrowhead": "dot"}]})
+    r = js(t) if not err else {}
+    ig = {(i["id"], tuple(i["fields"])) for i in r.get("ignored", [])}
+    raw = {e["id"]: e for e in json.loads(Path(lp).read_text())["elements"]}
+    step("update_elements：没生效的字段报 ignored", ig == {(fid, ("backgroundColor",)), ("c2", ("foo",)), ("c2", ("endArrowhead",))} and raw[fid]["name"] == "L2" and raw[fid]["backgroundColor"] == "transparent", r)
+    step("update_elements：箭头头部", raw["ln"]["endArrowhead"] == "triangle" and raw["ln"]["startArrowhead"] == "dot", {k: raw["ln"][k] for k in ("startArrowhead", "endArrowhead")})
+
+    old_v = raw["c2"]["version"]
+    a.call("delete_elements", {"path": lp, "ids": ["c2"]})
+    err, t, _ = a.call("draw", {"path": lp, "frame": fid, "elements": [{"type": "ellipse", "id": "c2", "x": 0, "y": 0, "width": 80, "height": 80}]})
+    raw = {e["id"]: e for e in json.loads(Path(lp).read_text())["elements"]}
+    step("draw：删掉的 id 可以再用（版本压过删除记录、放最上面）", not err and raw["c2"]["type"] == "ellipse" and not raw["c2"].get("isDeleted") and raw["c2"]["version"] > old_v + 1 and stack(fid)[-1] == "c2", t[0][:160])
+    err, t, _ = a.call("draw", {"path": lp, "elements": [{"type": "rectangle", "id": "c1", "x": 0, "y": 0, "width": 1, "height": 1}]})
+    step("draw：活着的 id 仍然不许重复", err and "already used" in t[0], t)
+    a.call("delete_elements", {"path": lp, "ids": ["bg"]})
+    err, t, _ = a.call("draw", {"path": lp, "frame": fid, "elements": [{"type": "rectangle", "id": "bg", "x": 0, "y": 0, "width": 10, "height": 10}, {"type": "rectangle", "id": "fg", "x": 0, "y": 0, "width": 10, "height": 10}]})
+    st = stack(fid)
+    step("draw：复用的 id 和新 id 一起画，按请求先后叠放", not err and st[-2:] == ["bg", "fg"], st)
+    a.call("update_elements", {"path": lp, "updates": [{"id": "fg", "order": "front"}, {"id": "fg", "order": "back"}]})
+    st = stack(fid)
+    step("update_elements：同一元素调了几次 order，最后一次算数", st[0] == "fg", st)
+    err, t, _ = a.call("get_feedback", {"path": lp})
+    fb = js(t)
+    step("get_feedback：Agent 调图层、复用 id 都不算用户改动", not any(fb["changes"].values()), fb["changes"])
+
     err, t, _ = a.call("read_drawing", {"path": str(OUTSIDE)})
     step("工作区外的文件拒绝", err and "outside" in t[0], t)
     err, t, _ = a.call("open_drawing", {"create": "x", "dir": "/tmp"})

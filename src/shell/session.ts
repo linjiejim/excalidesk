@@ -8,7 +8,7 @@ import { CaptureUpdateAction, getSceneVersion, reconcileElements, restoreAppStat
 import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
-import { isOpenComment, nonce as newNonce } from "./elements";
+import { bump, isOpenComment, nonce as newNonce, reorder, unreorder, type Order } from "./elements";
 
 type El = { id: string; version: number; versionNonce: number; isDeleted?: boolean; [k: string]: unknown };
 type Files = Record<string, { id: string; [k: string]: unknown }>;
@@ -64,7 +64,7 @@ export class DocSession {
   debounceMs = 800;
   maxWaitMs = 5000;
   /** 最近一次 Agent 修改：改之前每个元素的样子（null = Agent 新建的），「撤销」用 */
-  lastAgent: { agent: string; prev: Map<string, El | null> } | null = null;
+  lastAgent: { agent: string; prev: Map<string, El | null>; order?: { before: string[]; moved: Set<string> } } | null = null;
 
   /** 自测用：最近一次保存发出的元素数和字节数 */
   lastSave = { upserts: 0, bytes: 0, files: 0, full: false };
@@ -334,16 +334,23 @@ export class DocSession {
    * Agent 的修改：记下改之前的样子（撤销用），作为一次可撤销的修改放进画布，立即保存。
    * patch 只含这次新建或改过的元素。合并到画布之前没有 await（见 beginAgent）。
    */
-  async applyAgent(patch: readonly El[], files: Files, agent: string) {
+  async applyAgent(patch: readonly El[], files: Files, agent: string, order?: Order) {
     const cur = this.current().elements;
     const before = new Map(cur.map((e) => [e.id, e]));
     const byId = new Map(patch.map((e) => [e.id, e]));
+    let next = [...cur.map((e) => byId.get(e.id) ?? e), ...patch.filter((e) => !before.has(e.id))];
+    // 调图层：挪过的元素抬版本（增量保存和合并才认），也记进撤销
+    let moved = new Set<string>();
+    if (order) {
+      const r = reorder(next as any, order);
+      moved = r.moved;
+      next = r.elements.map((e) => (moved.has(e.id) ? bump(e) : e)) as unknown as El[];
+    }
     const prev = new Map<string, El | null>();
-    for (const id of byId.keys()) prev.set(id, before.get(id) ?? null);
-    const next = [...cur.map((e) => byId.get(e.id) ?? e), ...patch.filter((e) => !before.has(e.id))];
-    // 补齐 fractional index、修好绑定（新元素没有 index）
+    for (const id of [...byId.keys(), ...moved]) prev.set(id, before.get(id) ?? null);
+    // 补齐 fractional index、修好绑定（新元素和挪过的元素没有 index）
     const restored = restoreElements(next as any, null, { repairBindings: true }) as unknown as El[];
-    this.lastAgent = { agent, prev };
+    this.lastAgent = { agent, prev, order: moved.size ? { before: cur.map((e) => e.id), moved } : undefined };
     this.lastVersion = getSceneVersion(restored as any);
     this.apply(restored, files, true);
     this.settleUntil = 0;
@@ -369,8 +376,15 @@ export class DocSession {
     });
     // Agent 删掉、之后又被清理出列表的元素：按原样放回
     for (const [id, p] of rec.prev) if (p && !seen.has(id)) next.push({ ...p, version: p.version + 1, versionNonce: nonce() });
-    this.lastVersion = getSceneVersion(next as any);
-    this.apply(next, {}, true);
+    // 那次还调了图层：只把挪过的放回原位，再重新分配它们的 index（别的元素保持用户现在的顺序）
+    let out = next;
+    if (rec.order) {
+      const { before, moved } = rec.order;
+      out = unreorder(next, before, moved).map((e) => (moved.has(e.id) ? { ...e, index: null } : e));
+      out = restoreElements(out as any, null, { repairBindings: true }) as unknown as El[];
+    }
+    this.lastVersion = getSceneVersion(out as any);
+    this.apply(out, {}, true);
     this.settleUntil = 0;
     this.markDirty();
     await this.flush();

@@ -7,6 +7,7 @@
 - **120Hz**：解除 WKWebView 默认的 60fps 限制，ProMotion 屏上平移、手绘和 Chrome 一样跟手
 - **增量保存**：编辑时只把变了的元素交给 Rust，大图保存不卡主线程
 - **本地历史版本**：自动留档，合并前先备份，一键恢复或另存为副本
+- **和 Agent 协作（MCP）**：Claude Code、Codex 在图上画原型和方案，你改图或按 C 钉批注，点「发回」让它接着改；多个 Agent 可同时改不同的图
 - **边界情况都兜住**：iCloud 冲突版本自动合并；文件在外部被删除或移走时暂停保存，不会把它写回来
 - 中英双语、浅色 / 深色 / 跟随系统（设置 ⌘,）
 - 侧边栏：右键菜单、双击改名、拖动调整工作区顺序、按修改时间 / 创建时间 / 名称排序
@@ -18,6 +19,16 @@
 
 装好之后 Excalidesk 会从 GitHub Releases 自己更新：启动时和之后每隔几小时查一次最新 release，在后台下载，用 App 里内置的公钥验签，装好后提示重启（重启前先把打开的图存完）。在 设置 → 自动更新 里关掉，或用 Excalidesk → 检查更新… 立即检查。0.3.0 及更早的版本还没有这个功能，需要手动下载一次新版本。
 
+## Agent 协作
+
+在 设置（⌘,）→ Agent 里复制接入命令，比如：
+
+```bash
+claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp
+```
+
+之后让 Agent「在 Excalidesk 里画个方案」即可。它画完会等你：在图上直接改，或选中元素按 **C** 写批注，再点底部的「发回」。发回只由你手动点。Agent 只能碰工作区里的图，碰过的图在后台标签打开，不打断你手上的那张。详见 [docs/mcp.md](docs/mcp.md)。
+
 ## 开发
 
 需要 Node 20+、Rust（stable）、Xcode Command Line Tools。
@@ -27,6 +38,7 @@ npm install
 npm run tauri dev        # 开发模式
 npm run app              # 打包 .app → src-tauri/target/release/bundle/macos/
 npm run selftest         # 构建并在真 App 里跑端到端自测
+bench/mcp-e2e.py         # 扮演 Agent 走一遍 MCP 协作（先 npm run app）
 npm run release          # 打发布包（不带测试场景）→ release/Excalidesk_<版本>_<架构>.dmg
 npm run dev              # 只在浏览器里看界面（用假数据，不需要 Tauri）
 ```
@@ -44,14 +56,14 @@ npm run dev              # 只在浏览器里看界面（用假数据，不需�
 ```
 src/shell/        外壳 UI 与文档会话（保存调度、增量、外部修改合并）
 src/bench/        性能基准页（?bench=1）
-src-tauri/src/    Rust：文档模型与原子写、工作区扫描与 FSEvents、iCloud、菜单、120Hz
+src-tauri/src/    Rust：文档模型与原子写、工作区扫描与 FSEvents、iCloud、菜单、120Hz、mcp/（Agent 协作）
 bench/            基准与自测脚本、测试场景生成
 docs/             方案、P0 性能实验结果、各阶段说明
 ```
 
 ## 设计要点
 
-详见 [docs/plan.md](docs/plan.md)、[docs/p0-results.md](docs/p0-results.md)、[docs/p1-notes.md](docs/p1-notes.md)、[docs/p2-notes.md](docs/p2-notes.md)、[docs/v0.3-notes.md](docs/v0.3-notes.md)。
+详见 [docs/plan.md](docs/plan.md)、[docs/p0-results.md](docs/p0-results.md)、[docs/p1-notes.md](docs/p1-notes.md)、[docs/p2-notes.md](docs/p2-notes.md)、[docs/v0.3-notes.md](docs/v0.3-notes.md)、[docs/mcp.md](docs/mcp.md)。
 
 - Excalidraw 用官方 npm 包（锁定 0.18.1），不 fork。
 - Web 层只管画，Rust 层掌管文件：读写走 `NSFileCoordinator`，写入是临时文件 + rename 的原子写。

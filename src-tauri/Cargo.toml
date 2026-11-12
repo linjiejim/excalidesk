@@ -1,6 +1,6 @@
 [package]
 name = "excalidesk"
-version = "0.5.0"
+version = "0.6.0"
 description = "A fast, local-first Excalidraw desktop app for macOS"
 authors = ["Jim Lin"]
 license = "MIT"

@@ -77,14 +77,18 @@ const Icon = {
   gear: <Svg size={15}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></Svg>,
 };
 
-/** App 标志：随主题变色的矢量版（纸面、紫色手绘圆、铅笔） */
+/** App 标志：随主题变色的矢量版（工具栏形状拼成的 E：矩形竖笔，矩形、菱形、椭圆三横）。
+ *  20 px 下斜线和手绘抖动看不清，这里用干净线条 + 浅紫填充；大图标见 design/logo/make-logo.mjs */
 const Logo = ({ text = true }: { text?: boolean }) => (
   <span className="logo" title="Excalidesk">
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
       <rect x="1.5" y="1.5" width="21" height="21" rx="6" className="logo-tile" />
-      <path d="M12.6 6.2c-3.6-.6-6.7 1.6-6.9 4.9-.2 3.4 2.5 6 5.9 5.9 1.4-.1 2.6-.5 3.5-1.3" className="logo-ring" />
-      <path d="M18.2 6.4l-5.6 8" className="logo-pencil" />
-      <path d="M12.6 14.4l-.7 1.9 1.7-1.1z" className="logo-tip" />
+      <g className="logo-mark">
+        <rect x="6.35" y="5" width="3.1" height="13.7" />
+        <rect x="9.45" y="5" width="8" height="3.2" />
+        <path d="M9.25 11.7 13.05 10.05 16.95 11.7 13.05 13.35Z" />
+        <ellipse cx="13.55" cy="16.95" rx="4.1" ry="1.8" />
+      </g>
     </svg>
     {text && <b>Excalidesk</b>}
   </span>

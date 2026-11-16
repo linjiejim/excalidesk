@@ -1,0 +1,13 @@
+{
+  "output": "e-shapes.png",
+  "backend": "codex",
+  "model": "codex built-in image_gen (ChatGPT gpt-image, version not exposed)",
+  "requestedSize": null,
+  "actualSize": "1254x1254",
+  "quality": null,
+  "estimatedCostUsd": null,
+  "elapsedSec": 114.2,
+  "codexSource": "/Users/jim/.codex/generated_images/01a1e4b2-df5d-7463-a04a-53a89504d971/exec-c9d90bea-1cbd-4c97-a629-092377ebff55.png",
+  "createdAt": "2026-11-16T14:13:23.837534+00:00",
+  "promptFile": "e-shapes.png.prompt.md"
+}

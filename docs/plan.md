@@ -259,7 +259,7 @@ iCloud 真冲突（NSFileVersion.unresolvedConflictVersions 不为空）
 - **AI / MCP：** 内置一个本地 MCP server，让 Claude 读写工作区里的图（「把这段需求画成流程图」「整理这张图的布局」）；Excalidraw 自带的「文本转图」（Mermaid）也可以接上 Claude。
 - **Obsidian 互通：** 读写 `.excalidraw.md`。
 - **全文搜索：** Rust 侧解析文本元素建索引，⌘K 跨文件搜图里的字。
-- **演示模式：** 把 frame 当幻灯片放映。
+- **演示模式：** 把 frame 当幻灯片放映。（0.7.0 做了，含演讲者备注和导出 PDF，见 [specs/20261117-presentation-mode.md](specs/20261117-presentation-mode.md)）
 - **Quick Look / Finder 缩略图：** Swift 写的 App 扩展（`.appex`）；需要 App Group 共享缩略图缓存，或者在扩展里自己渲染。
 - **素材库同步：** 把 library 存成工作区里的 `.excalidrawlib`，跟着 iCloud 走。
 - **全局快捷键：** 在任意 App 里一键新建草图，或者截图后贴进画布标注。

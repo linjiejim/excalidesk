@@ -254,6 +254,50 @@ try:
     fb = js(t)
     step("get_feedback：Agent 调图层、复用 id 都不算用户改动", not any(fb["changes"].values()), fb["changes"])
 
+    # 演示文稿：固定尺寸页、横排、不撑大、备注、放映顺序（docs/specs/20261117-presentation-mode.md）
+    _, t, _ = a.call("open_drawing", {"create": "deck"})
+    dp = js(t)["path"]
+
+    def frames_in_file():
+        return {e["name"]: e for e in json.loads(Path(dp).read_text())["elements"] if e["type"] == "frame" and not e.get("isDeleted")}
+
+    err, t, _ = a.call("draw", {"path": dp, "slide": True, "frame": "Intro", "style": "clean", "notes": "Say hello.", "elements": [
+        {"type": "text", "id": "title", "x": 120, "y": 120, "text": "Decks in Excalidesk", "fontSize": 72},
+    ]})
+    r1 = js(t) if not err else {}
+    err2, t2, _ = a.call("draw", {"path": dp, "slide": True, "frame": "Plan", "style": "clean", "elements": [
+        {"type": "text", "id": "plan", "x": 120, "y": 120, "text": "Plan", "fontSize": 72},
+        {"type": "rectangle", "id": "wide", "x": 1700, "y": 500, "width": 400, "height": 200},
+    ]})
+    r2 = js(t2) if not err2 else {}
+    fr = frames_in_file()
+    intro, plan = fr.get("Intro", {}), fr.get("Plan", {})
+    step("draw slide：1920×1080 固定页、带标记", not err and (intro.get("width"), intro.get("height")) == (1920, 1080) and intro.get("customData", {}).get("excalidesk", {}).get("slide") is True, {k: intro.get(k) for k in ("x", "y", "width", "height")})
+    step("draw slide：第二页在右边 160、顶边对齐", not err2 and plan.get("x") == intro.get("x", 0) + 1920 + 160 and plan.get("y") == intro.get("y"), {k: plan.get(k) for k in ("x", "y")})
+    step("draw slide：超出的报 overflow，页不撑大", r2.get("overflow") == ["wide"] and (plan.get("width"), plan.get("height")) == (1920, 1080), r2.get("overflow"))
+    nf = next((f for f in fr.values() if f.get("customData", {}).get("excalidesk", {}).get("notesFor") == intro.get("id")), {})
+    step("draw slide：notes 在页下方建备注 frame", r1.get("notes") and nf.get("y") == intro.get("y", 0) + 1080 + 80 and nf.get("x") == intro.get("x") and "overflow" not in r1, {k: nf.get(k) for k in ("name", "x", "y")})
+    err, t, _ = a.call("draw", {"path": dp, "slide": True, "frame": "Intro", "elements": [], "notes": "Say hello, then the plan."})
+    step("draw slide：再给 notes 是替换文字", not err and js(t).get("notes") == r1.get("notes") and len(frames_in_file()) == 3, t[0][:160])
+    err, t, _ = a.call("draw", {"path": dp, "notes": "x", "elements": [{"type": "text", "x": 0, "y": 0, "text": "x"}]})
+    step("draw：notes 不带 slide 报错", err and "slide" in t[0], t)
+    err, t, _ = a.call("draw_mermaid", {"path": dp, "slide": True, "frame": "Flow", "mermaid": "flowchart LR\n A[Draw] --> B[Present] --> C[PDF]"})
+    flow = frames_in_file().get("Flow", {})
+    # Plan 页上的 wide 伸出页外到 plan.x + 2100：新页跳过它，再空 160
+    step("draw_mermaid slide：第三页（跳过伸出来的内容）、不撑大", not err and flow.get("x") == plan.get("x", 0) + 2100 + 160 and flow.get("y") == plan.get("y") and (flow.get("width"), flow.get("height")) == (1920, 1080), {k: flow.get(k) for k in ("x", "y", "width", "height")})
+    err, t, _ = a.call("read_drawing", {"path": dp})
+    d = js(t) if not err else {}
+    sl = d.get("slides", [])
+    step("read_drawing：slides 按放映顺序、带备注", [x.get("name") for x in sl] == ["Intro", "Plan", "Flow"] and sl[0].get("notes") == "Say hello, then the plan." and sl[0].get("fixed") is True and "notes" not in sl[1], sl)
+    step("read_drawing：备注 frame 标了 notesFor", [f.get("notesFor") for f in d.get("frames", []) if f.get("notesFor")] == [intro.get("id")], d.get("frames"))
+    a.call("update_elements", {"path": dp, "updates": [{"id": intro["id"], "y": intro["y"] + 3000}]})
+    nf2 = next((f for f in frames_in_file().values() if f["id"] == nf.get("id")), {})
+    step("update_elements：挪页时备注跟着走", nf2.get("y") == nf.get("y", 0) + 3000 and nf2.get("x") == nf.get("x"), {k: nf2.get(k) for k in ("x", "y")})
+    err, t, img = a.call("render_drawing", {"path": dp, "frame": "Plan"})
+    step("render_drawing 单独一页", not err and bool(img), t)
+    err, t, _ = a.call("get_feedback", {"path": dp})
+    step("get_feedback：Agent 建页、写备注都不算用户改动", not err and not any(js(t)["changes"].values()), js(t)["changes"] if not err else t)
+
     err, t, _ = a.call("read_drawing", {"path": str(OUTSIDE)})
     step("工作区外的文件拒绝", err and "outside" in t[0], t)
     err, t, _ = a.call("open_drawing", {"create": "x", "dir": "/tmp"})

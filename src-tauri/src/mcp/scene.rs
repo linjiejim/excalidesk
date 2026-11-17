@@ -58,6 +58,30 @@ pub struct Comment {
 pub struct Scene {
     pub elements: Vec<SEl>,
     pub comments: Vec<Comment>,
+    /// 按放映顺序的页（备注 frame 不算）
+    pub slides: Vec<SlideInfo>,
+    /// 备注 frame → 它归属的页
+    pub notes_owner: HashMap<String, String>,
+}
+
+/// 演示文稿里的一页。规则和前端 src/shell/slides.ts 一样（docs/specs/20261117-presentation-mode.md），改一边要改另一边
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct SlideInfo {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub x: i64,
+    pub y: i64,
+    pub w: i64,
+    pub h: i64,
+    /// 固定尺寸页（customData.excalidesk.slide）：Agent 往里加东西不撑大
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fixed: bool,
+    /// 演讲者备注的文字
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+    #[serde(rename = "notesFrame", skip_serializing_if = "Option::is_none")]
+    pub notes_frame: Option<String>,
 }
 
 /// Agent 上次看过（读、写、取反馈）时的样子
@@ -150,7 +174,129 @@ pub fn simplify(elements: &[Value]) -> Scene {
             by: ext(e).and_then(|x| x.get("by")).and_then(Value::as_str).map(String::from),
         });
     }
+    let (slides, owner) = slides(&live);
+    out.slides = slides;
+    out.notes_owner = owner;
     out
+}
+
+struct Fr<'a> {
+    id: &'a str,
+    name: Option<&'a str>,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    fixed: bool,
+    notes_for: Option<&'a str>,
+}
+
+fn f(e: &Value, k: &str) -> f64 {
+    e.get(k).and_then(Value::as_f64).unwrap_or(0.0)
+}
+
+/// 名字以「备注 / Notes」开头的 frame（手画的）或带 notesFor 的 frame 是备注
+fn is_notes(fr: &Fr) -> bool {
+    let n = fr.name.unwrap_or("").trim_start();
+    fr.notes_for.is_some() || n.starts_with("备注") || n.to_lowercase().starts_with("notes")
+}
+
+/// 先行后列：按顶边排，垂直中线落在当前行上下范围内的归进这一行，行内从左到右
+fn order<'a, 'b>(mut frames: Vec<&'b Fr<'a>>) -> Vec<&'b Fr<'a>> {
+    let cmp = |a: f64, b: f64| a.partial_cmp(&b).unwrap_or(std::cmp::Ordering::Equal);
+    frames.sort_by(|a, b| cmp(a.y, b.y).then(cmp(a.x, b.x)));
+    let mut rows: Vec<(f64, f64, Vec<&Fr>)> = Vec::new();
+    for fr in frames {
+        let cy = fr.y + fr.h / 2.0;
+        match rows.last_mut() {
+            Some((top, bottom, items)) if cy >= *top && cy <= *bottom => {
+                items.push(fr);
+                *bottom = bottom.max(fr.y + fr.h);
+            }
+            _ => rows.push((fr.y, fr.y + fr.h, vec![fr])),
+        }
+    }
+    rows.into_iter()
+        .flat_map(|(_, _, mut items)| {
+            items.sort_by(|a, b| cmp(a.x, b.x).then(cmp(a.y, b.y)));
+            items
+        })
+        .collect()
+}
+
+/// 备注归哪一页：正上方最近的一页优先（复制页 + 备注时 notesFor 还指着原来那页）；正上方没有页才用 notesFor
+fn owner_of<'a>(n: &Fr, slides: &[&Fr<'a>]) -> Option<&'a str> {
+    let cx = n.x + n.w / 2.0;
+    let mut best: Option<(&'a str, f64)> = None;
+    for s in slides {
+        if cx < s.x || cx > s.x + s.w || n.y < s.y + s.h / 2.0 {
+            continue;
+        }
+        let gap = (n.y - (s.y + s.h)).abs();
+        if best.is_none_or(|(_, g)| gap < g) {
+            best = Some((s.id, gap));
+        }
+    }
+    best.map(|(id, _)| id).or_else(|| n.notes_for.and_then(|id| slides.iter().find(|s| s.id == id).map(|s| s.id)))
+}
+
+fn slides(live: &[&Value]) -> (Vec<SlideInfo>, HashMap<String, String>) {
+    let frames: Vec<Fr> = live
+        .iter()
+        .filter(|e| matches!(s(e, "type"), Some("frame" | "magicframe")))
+        .filter_map(|e| {
+            let (x, y, w, h) = (f(e, "x"), f(e, "y"), f(e, "width"), f(e, "height"));
+            Some(Fr {
+                id: s(e, "id")?,
+                name: s(e, "name"),
+                x: x.min(x + w),
+                y: y.min(y + h),
+                w: w.abs(),
+                h: h.abs(),
+                fixed: ext(e).and_then(|x| x.get("slide")).and_then(Value::as_bool).unwrap_or(false),
+                notes_for: ext(e).and_then(|x| x.get("notesFor")).and_then(Value::as_str),
+            })
+        })
+        .collect();
+    let slides = order(frames.iter().filter(|fr| !is_notes(fr)).collect());
+    let mut owner: HashMap<String, String> = HashMap::new();
+    let mut notes: Vec<&Fr> = frames.iter().filter(|fr| is_notes(fr)).collect();
+    notes.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap_or(std::cmp::Ordering::Equal));
+    for n in &notes {
+        if let Some(o) = owner_of(n, &slides) {
+            owner.insert(n.id.to_string(), o.to_string());
+        }
+    }
+    // 备注 frame 里的文字（含形状里的标签），按 y、x 排
+    let frame_of: HashMap<&str, &str> = live.iter().filter_map(|e| Some((s(e, "id")?, s(e, "frameId")?))).collect();
+    let texts_in = |nid: &str| -> String {
+        let mut ts: Vec<&&Value> = live
+            .iter()
+            .filter(|e| s(e, "type") == Some("text") && comment_part_of(e).is_none())
+            .filter(|e| s(e, "frameId") == Some(nid) || s(e, "containerId").and_then(|c| frame_of.get(c)) == Some(&nid))
+            .collect();
+        ts.sort_by(|a, b| f(a, "y").partial_cmp(&f(b, "y")).unwrap_or(std::cmp::Ordering::Equal).then(f(a, "x").partial_cmp(&f(b, "x")).unwrap_or(std::cmp::Ordering::Equal)));
+        ts.iter().filter_map(|e| text_of(e)).map(str::trim).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n")
+    };
+    let list = slides
+        .iter()
+        .map(|sl| {
+            let mine: Vec<&&Fr> = notes.iter().filter(|n| owner.get(n.id).map(String::as_str) == Some(sl.id)).collect();
+            let text = mine.iter().map(|n| texts_in(n.id)).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n");
+            SlideInfo {
+                id: sl.id.to_string(),
+                name: sl.name.map(String::from),
+                x: sl.x.round() as i64,
+                y: sl.y.round() as i64,
+                w: sl.w.round() as i64,
+                h: sl.h.round() as i64,
+                fixed: sl.fixed,
+                notes: (!text.is_empty()).then_some(text),
+                notes_frame: mine.first().map(|n| n.id.to_string()),
+            }
+        })
+        .collect();
+    (list, owner)
 }
 
 fn text_of(e: &Value) -> Option<&str> {
@@ -314,7 +460,11 @@ pub fn overview(scene: &Scene, limit: usize) -> Value {
         .filter(|e| e.kind == "frame" || e.kind == "magicframe")
         .map(|f| {
             let n = scene.elements.iter().filter(|e| e.frame.as_deref() == Some(&f.id)).count();
-            json!({ "id": f.id, "name": f.name, "x": f.x, "y": f.y, "w": f.w, "h": f.h, "elements": n })
+            let mut v = json!({ "id": f.id, "name": f.name, "x": f.x, "y": f.y, "w": f.w, "h": f.h, "elements": n });
+            if let Some(o) = scene.notes_owner.get(&f.id) {
+                v["notesFor"] = json!(o);
+            }
+            v
         })
         .collect();
     let mut kinds: BTreeMap<&str, usize> = BTreeMap::new();
@@ -331,6 +481,9 @@ pub fn overview(scene: &Scene, limit: usize) -> Value {
     });
     if let Some((x0, y0, x1, y1)) = bounds(&scene.elements) {
         v["bounds"] = json!({ "x": x0, "y": y0, "w": x1 - x0, "h": y1 - y0 });
+    }
+    if !scene.slides.is_empty() {
+        v["slides"] = json!(scene.slides);
     }
     if truncated {
         v["truncated"] = json!(format!("Only the first {limit} of {} elements are listed. Pass `frame` to read one frame at a time.", scene.elements.len()));
@@ -414,6 +567,73 @@ mod tests {
         assert_eq!(f["changes"]["modified"].as_array().unwrap().len(), 1);
         assert_eq!(f["changes"]["modified"][0]["id"], "b");
         assert!(f["changes"]["added"].as_array().unwrap().is_empty());
+    }
+
+    fn frame(id: &str, name: &str, x: f64, y: f64, w: f64, h: f64) -> Value {
+        json!({ "id": id, "type": "frame", "name": name, "x": x, "y": y, "width": w, "height": h })
+    }
+    fn text_in(id: &str, frame: &str, y: f64, t: &str) -> Value {
+        json!({ "id": id, "type": "text", "x": 0, "y": y, "width": 10, "height": 10, "frameId": frame, "text": t, "originalText": t })
+    }
+    fn order_of(s: &Scene) -> Vec<&str> {
+        s.slides.iter().map(|x| x.id.as_str()).collect()
+    }
+
+    #[test]
+    fn slides_play_row_by_row() {
+        // 第二行先画、第一行的两页反着画、高矮不一：还是先行后列
+        let s = simplify(&[
+            frame("c", "C", 0.0, 2000.0, 1920.0, 1080.0),
+            frame("b", "B", 2080.0, 100.0, 1920.0, 800.0),
+            frame("a", "A", 0.0, 0.0, 1920.0, 1080.0),
+        ]);
+        assert_eq!(order_of(&s), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn notes_pair_by_geometry_then_id() {
+        let mut marked = frame("n1", "Notes", 0.0, 1160.0, 1920.0, 480.0);
+        marked["customData"] = json!({ "excalidesk": { "notesFor": "a" } });
+        // 复制页 + 备注：notesFor 还指着 a，但它在 b 的正下方
+        let mut copied = frame("n2", "Notes", 2080.0, 1160.0, 1920.0, 480.0);
+        copied["customData"] = json!({ "excalidesk": { "notesFor": "a" } });
+        // 页挪走了、备注没跟：正上方没有页，退回 notesFor
+        let mut stray = frame("n3", "备注", 9000.0, 5000.0, 1920.0, 480.0);
+        stray["customData"] = json!({ "excalidesk": { "notesFor": "c" } });
+        let s = simplify(&[
+            frame("a", "A", 0.0, 0.0, 1920.0, 1080.0),
+            frame("b", "B", 2080.0, 0.0, 1920.0, 1080.0),
+            frame("c", "C", 4160.0, 0.0, 1920.0, 1080.0),
+            marked,
+            copied,
+            stray,
+            // 手画的、只靠名字认出来的备注
+            frame("hand", "备注 · 第二页", 2100.0, 1300.0, 1800.0, 300.0),
+            text_in("t1", "n1", 1200.0, "first"),
+            text_in("t3", "n2", 1300.0, "second, lower"),
+            text_in("t2", "n2", 1200.0, "second"),
+            text_in("t4", "n3", 5100.0, "third"),
+            text_in("t5", "hand", 1350.0, "by hand"),
+        ]);
+        assert_eq!(order_of(&s), vec!["a", "b", "c"]);
+        assert_eq!(s.slides[0].notes.as_deref(), Some("first"));
+        assert_eq!(s.slides[1].notes.as_deref(), Some("second\n\nsecond, lower\n\nby hand"));
+        assert_eq!(s.slides[1].notes_frame.as_deref(), Some("n2"));
+        assert_eq!(s.slides[2].notes.as_deref(), Some("third"));
+        assert_eq!(s.notes_owner.get("hand").map(String::as_str), Some("b"));
+        let v = overview(&s, 100);
+        assert_eq!(v["slides"].as_array().unwrap().len(), 3);
+        assert_eq!(v["frames"].as_array().unwrap().iter().filter(|f| f.get("notesFor").is_some()).count(), 4);
+    }
+
+    #[test]
+    fn fixed_slides_are_marked() {
+        let mut a = frame("a", "A", 0.0, 0.0, 1920.0, 1080.0);
+        a["customData"] = json!({ "excalidesk": { "slide": true } });
+        let s = simplify(&[a, frame("b", "B", 2080.0, 0.0, 800.0, 600.0)]);
+        assert!(s.slides[0].fixed);
+        assert!(!s.slides[1].fixed);
+        assert!(s.slides[0].notes.is_none());
     }
 
     #[test]

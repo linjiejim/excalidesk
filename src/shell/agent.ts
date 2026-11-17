@@ -10,6 +10,7 @@ import {
 import { t } from "./i18n";
 import { inTauri, ipc } from "./ipc";
 import type { DocSession } from "./session";
+import { buildFrame, buildNotes, isFixedSlide, isNotesFrame, nextSlideBox, slidesOf } from "./slides";
 import { getState, setState, toast, updateTab, type AgentView } from "./store";
 
 type Files = Record<string, any>;
@@ -209,6 +210,85 @@ function frameUp(newEls: El[], frame: string | undefined, frameEl: El | undefine
   return { newEls: [f, ...newEls.map((e) => ({ ...e, frameId }))], changed, frameId };
 }
 
+// ── 幻灯片（docs/specs/20261117-presentation-mode.md）──
+
+/**
+ * 这次要画到哪一页：slide 且没有这个 frame → 新建一页固定尺寸的页（接在最后一页右边）；
+ * 加进已有的固定页，或者 slide 指定了已有的 frame → 就是它。其他情况不是「页」，走原来的 frame 逻辑（会撑大）。
+ */
+function pageFor(cur: readonly El[], a: { slide?: boolean; frame?: string; at?: unknown }, frameEl: El | undefined) {
+  if (a.slide && a.at) throw new Error("`at` doesn't go with `slide`: coordinates are relative to the slide's top-left, and the slide is 1920×1080");
+  if (a.slide && frameEl && isNotesFrame(frameEl)) throw new Error(`"${a.frame}" is a speaker-notes frame, not a slide; pass the slide's name and put the text in \`notes\``);
+  if (a.slide && !frameEl) return { page: buildFrame(nextSlideBox(cur), a.frame ?? `Slide ${slidesOf(cur).length + 1}`, { slide: true }), isNew: true };
+  if (frameEl && (a.slide || isFixedSlide(frameEl))) return { page: frameEl, isNew: false };
+  return null;
+}
+
+/** 放进页里：页不撑大（新页带上 frame 本身） */
+function intoPage(newEls: El[], page: El, isNew: boolean) {
+  return { newEls: [...(isNew ? [page] : []), ...newEls.map((e) => ({ ...e, frameId: page.id }))], changed: [] as El[], frameId: page.id };
+}
+
+/** 线和箭头按点算范围，其他按 x / y / 宽高 */
+function extent(e: El): Box {
+  if (!Array.isArray(e.points) || !e.points.length) return boxOf(e);
+  const xs = e.points.map((p: number[]) => e.x + p[0]), ys = e.points.map((p: number[]) => e.y + p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
+/** 超出页边的元素：放映和 PDF 里会被裁掉 */
+function overflowOf(els: readonly El[], page: El) {
+  const p = boxOf(page);
+  return els
+    .filter((e) => e.id !== page.id && !(e.type === "text" && e.containerId) && !isFrame(e))
+    .filter((e) => {
+      const b = extent(e);
+      return b.x < p.x - 0.5 || b.y < p.y - 0.5 || b.x + b.w > p.x + p.w + 0.5 || b.y + b.h > p.y + p.h + 0.5;
+    })
+    .map((e) => e.id);
+}
+const OVERFLOW_HINT = "These elements stick out of the slide and get cut off when presenting and in the PDF; move them inside (the slide is its frame's width × height) or make them smaller.";
+
+/**
+ * 写这一页的演讲者备注：没有备注 frame 就在页下方建一个；有就替换里面那段文字（文字变长就把备注 frame 撑高）。
+ * 返回要新建的、要改的元素和放文字的那个元素的 id。
+ */
+function writeNotes(cur: readonly El[], page: El, isNew: boolean, text: string) {
+  const own = isNew ? undefined : slidesOf(cur).find((s) => s.frame.id === page.id)?.notes[0];
+  if (!own) {
+    const made = buildNotes(page, text);
+    return { created: made.elements, changed: [] as El[], id: made.holder.id };
+  }
+  const byId = new Map(cur.map((e) => [e.id, e]));
+  const inside = live(cur).filter((e) => e.frameId === own.id && !isCommentLike(e));
+  const holder = inside.find((e) => e.type !== "text" && boundTextOf(e, byId)) ?? inside.find((e) => e.type === "text" && !e.containerId);
+  const changed: El[] = [];
+  let id: string;
+  if (!holder) {
+    // 备注 frame 是空的：在里面放一段
+    // buildNotes 把它放在 own 的下方，挪回 own 里面
+    const made = buildNotes(own, text);
+    const [, ...inner] = made.elements;
+    const dy = own.y + 40 - made.holder.y;
+    const created = inner.map((e) => ({ ...e, y: e.y + dy, frameId: own.id }));
+    return { created, changed, id: made.holder.id };
+  }
+  if (holder.type === "text") {
+    const next = relayoutText(holder, text);
+    changed.push(next);
+    id = next.id;
+  } else {
+    const r = layoutLabel(holder, boundTextOf(holder, byId), text);
+    changed.push(r.container);
+    if (r.text) changed.push(r.text);
+    id = r.container.id;
+  }
+  const box = unionBox(changed)!;
+  if (box.y + box.h + 40 > own.y + own.height) changed.push(bump(own, { height: box.y + box.h + 40 - own.y }));
+  return { created: [] as El[], changed, id };
+}
+
 function styled(sk: any[], style?: string) {
   if (style !== "clean") return sk;
   return sk.map((e) => ({
@@ -223,10 +303,13 @@ const shapeCount = (els: El[]) => els.filter((e) => !(e.type === "text" && e.con
 
 // ── 写 ─────────────────────────────────────────────────
 
-type DrawArgs = { path: string; agent: string; elements: any[]; frame?: string; at?: { x: number; y: number }; style?: string };
+type DrawArgs = { path: string; agent: string; elements: any[]; frame?: string; at?: { x: number; y: number }; style?: string; slide?: boolean; notes?: string };
 
 async function draw(a: DrawArgs) {
-  if (!Array.isArray(a.elements) || !a.elements.length) throw new Error("`elements` is empty");
+  if (!Array.isArray(a.elements)) throw new Error("`elements` must be an array");
+  // 只建一页、只写备注的时候可以不带元素
+  if (!a.elements.length && !a.slide) throw new Error("`elements` is empty");
+  if (a.notes != null && !a.slide) throw new Error("`notes` only goes with `slide: true`");
   const s = await ensureSession(a.path);
   await begin(s);
   // 从这里到 applyAgent 都是同步的：读到的画布就是放进去那一刻的画布
@@ -245,7 +328,8 @@ async function draw(a: DrawArgs) {
     }
   }
   const frameEl = a.frame ? findFrame(cur, a.frame) : undefined;
-  const o = origin(cur, a.at, frameEl);
+  const pg = pageFor(cur, a, frameEl);
+  const o = pg ? { x: pg.page.x, y: pg.page.y } : origin(cur, a.at, frameEl);
   const sk: any[] = styled(
     a.elements.map((e) => {
       const { order, ...rest } = structuredClone(e);
@@ -291,8 +375,13 @@ async function draw(a: DrawArgs) {
     }
     out.set(arrow.id, arrow);
   }
-  const placed = frameUp([...out.values()], a.frame, frameEl);
+  const placed = pg ? intoPage([...out.values()], pg.page, pg.isNew) : frameUp([...out.values()], a.frame, frameEl);
   for (const e of placed.changed) existing.set(e.id, e);
+  const notes = pg && a.notes != null ? writeNotes(cur, pg.page, pg.isNew, String(a.notes)) : null;
+  if (notes) {
+    placed.newEls.push(...notes.created);
+    for (const e of notes.changed) existing.set(e.id, e);
+  }
   // 复用的 id：版本压过那条删除记录（合并时才赢）。删除记录还占着原来的位置，
   // 所以这一批新画的（不只是复用的）都按请求里的先后重新放到最上面，保证「后画的在上面」
   const reused = placed.newEls.some((e) => byId.get(e.id)?.isDeleted);
@@ -302,17 +391,22 @@ async function draw(a: DrawArgs) {
   });
   const front = reused ? sk.map((e) => e.id).filter((id) => !back.includes(id)) : [];
   await s.applyAgent([...existing.values(), ...created], {}, a.agent, back.length || front.length ? { back, front } : undefined);
-  banner(s, a.agent, t("agent.drew", { n: shapeCount(created) }));
-  const box = unionBox(created)!;
+  banner(s, a.agent, existing.size && !created.length ? t("agent.changed", { n: existing.size }) : t("agent.drew", { n: shapeCount(created) }));
+  const box = unionBox(created) ?? unionBox([...existing.values()]) ?? boxOf(pg!.page);
+  // 备注本来就在页外面
+  const noteIds = new Set(notes?.created.map((e) => e.id));
+  const overflow = pg ? overflowOf(created.filter((e) => !noteIds.has(e.id)), pg.page) : [];
   return {
     ids: [...created.map((e) => e.id), ...existing.keys()],
     created: created.filter((e) => !(e.type === "text" && e.containerId)).map((e) => e.id),
     frame: placed.frameId,
     bounds: { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) },
+    ...(pg ? { slide: pg.page.id, ...(notes ? { notes: notes.id } : {}) } : {}),
+    ...(overflow.length ? { overflow, overflowHint: OVERFLOW_HINT } : {}),
   };
 }
 
-async function mermaid(a: { path: string; agent: string; mermaid: string; frame?: string; at?: { x: number; y: number }; style?: string }) {
+async function mermaid(a: { path: string; agent: string; mermaid: string; frame?: string; at?: { x: number; y: number }; style?: string; slide?: boolean }) {
   if (!a.mermaid?.trim()) throw new Error("`mermaid` is empty");
   const s = await ensureSession(a.path);
   const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
@@ -327,20 +421,29 @@ async function mermaid(a: { path: string; agent: string; mermaid: string; frame?
   await begin(s);
   const { elements: cur } = snap(s);
   const frameEl = a.frame ? findFrame(cur, a.frame) : undefined;
-  const o = origin(cur, a.at, frameEl);
+  const pg = pageFor(cur, a, frameEl);
   const b = unionBox(conv)!;
+  let o: { x: number; y: number };
+  if (pg) {
+    // 页里：水平居中，放在页里已有内容的下方；空页就上下也居中
+    const inside = pg.isNew ? null : unionBox(live(cur).filter((e) => e.frameId === pg.page.id));
+    o = { x: pg.page.x + (pg.page.width - b.w) / 2, y: inside ? inside.y + inside.h + 60 : pg.page.y + Math.max(60, (pg.page.height - b.h) / 2) };
+  } else o = origin(cur, a.at, frameEl);
   const moved = conv.map((e) => ({ ...e, x: e.x - b.x + o.x, y: e.y - b.y + o.y }));
-  const placed = frameUp(moved, a.frame, frameEl);
+  const placed = pg ? intoPage(moved, pg.page, pg.isNew) : frameUp(moved, a.frame, frameEl);
   const existing = new Map(placed.changed.map((e) => [e.id, e]));
   const created = placed.newEls.map((e) => stamp(e, a.agent));
   await s.applyAgent([...existing.values(), ...created], (parsed.files ?? {}) as Files, a.agent);
   banner(s, a.agent, t("agent.drew", { n: shapeCount(created) }));
   const box = unionBox(created)!;
+  const overflow = pg ? overflowOf(created, pg.page) : [];
   return {
     ids: [...created.map((e) => e.id), ...existing.keys()],
     created: created.filter((e) => !(e.type === "text" && e.containerId)).map((e) => e.id),
     frame: placed.frameId,
     bounds: { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.w), h: Math.round(box.h) },
+    ...(pg ? { slide: pg.page.id } : {}),
+    ...(overflow.length ? { overflow, overflowHint: OVERFLOW_HINT } : {}),
   };
 }
 
@@ -363,6 +466,9 @@ async function update(a: { path: string; agent: string; updates: any[] }) {
   const ignored: Ignored[] = [];
   // 同一个元素在一批里调了几次：最后一次算数
   const sides = new Map<string, "back" | "front">();
+  // 挪页时它的备注跟着走（这一批里也明确挪了备注的除外）
+  const notesOf = new Map(slidesOf(cur).map((sl) => [sl.frame.id, sl.notes]));
+  const named = new Set(a.updates.map((u) => u?.id));
   for (const u0 of a.updates) {
     let el = u0?.id ? get(u0.id) : undefined;
     if (!el || el.isDeleted) {
@@ -410,6 +516,15 @@ async function update(a: { path: string; agent: string; updates: any[] }) {
         if (f.containerId === el.id || (isFrame(el) && f.frameId === el.id)) {
           const g = get(f.id)!;
           changed.set(f.id, bump(g, { x: g.x + dx, y: g.y + dy }));
+        }
+      }
+      for (const n of notesOf.get(el.id) ?? []) {
+        if (named.has(n.id)) continue;
+        for (const f of live(cur)) {
+          if (f.id === n.id || f.frameId === n.id || (f.containerId && byId.get(f.containerId)?.frameId === n.id && f.frameId !== n.id)) {
+            const g = get(f.id)!;
+            changed.set(f.id, bump(g, { x: g.x + dx, y: g.y + dy }));
+          }
         }
       }
     }

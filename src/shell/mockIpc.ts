@@ -5,9 +5,24 @@ const ROOT = "/Users/demo/Library/Mobile Documents/com~apple~CloudDocs/Excalidra
 const LOCAL = "/Users/demo/Code/docs";
 const files = new Map<string, string>();
 const empty = JSON.stringify({ type: "excalidraw", version: 2, elements: [], appState: {}, files: {} });
-const seed = [`${ROOT}/产品/App 首页改版.excalidraw`, `${ROOT}/产品/用户旅程.excalidraw`, `${ROOT}/架构/系统架构.excalidraw`, `${ROOT}/架构/数据流.excalidraw`, `${LOCAL}/周会白板.excalidraw`];
+// 假文件名跟着界面语言走（官网截图要中英两版，scripts/site-screens.mjs）。
+// 这个模块在真 App 里也会被加载，settings 坏了不能抛
+const lang = (() => {
+  try {
+    return String(JSON.parse(localStorage.getItem("settings") ?? "{}")?.lang ?? "system");
+  } catch {
+    return "system";
+  }
+})();
+const en = lang === "en" || (lang === "system" && !navigator.language.toLowerCase().startsWith("zh"));
+const N = en
+  ? { product: "Product", home: "Home redesign", journey: "User journey", arch: "Architecture", system: "System overview", flow: "Data flow", weekly: "Weekly sync" }
+  : { product: "产品", home: "App 首页改版", journey: "用户旅程", arch: "架构", system: "系统架构", flow: "数据流", weekly: "周会白板" };
+const LARGE = `${ROOT}/${N.arch}/${N.system}.excalidraw`;
+const DATALESS = `${ROOT}/${N.arch}/${N.flow}.excalidraw`;
+const seed = [`${ROOT}/${N.product}/${N.home}.excalidraw`, `${ROOT}/${N.product}/${N.journey}.excalidraw`, LARGE, DATALESS, `${LOCAL}/${N.weekly}.excalidraw`];
 seed.forEach((p) => files.set(p, empty));
-const state: Persisted = { roots: [ROOT, LOCAL], recent: [`${ROOT}/架构/系统架构.excalidraw`], viewports: {} };
+const state: Persisted = { roots: [ROOT, LOCAL], recent: [LARGE], viewports: {} };
 
 function tree(root: string): TreeNode[] {
   const out: TreeNode[] = [];
@@ -20,7 +35,7 @@ function tree(root: string): TreeNode[] {
       let n = level.find((x) => x.path === base);
       if (!n) {
         const mtime = Date.now() - (p.length % 7) * 3600e3;
-        n = { name: isFile ? part.replace(/\.excalidraw$/, "") : part, path: base, dir: !isFile, children: isFile ? undefined : [], mtime, ctime: mtime - 86400e3, dataless: p.endsWith("数据流.excalidraw") };
+        n = { name: isFile ? part.replace(/\.excalidraw$/, "") : part, path: base, dir: !isFile, children: isFile ? undefined : [], mtime, ctime: mtime - 86400e3, dataless: p === DATALESS };
         level.push(n);
       }
       level = n.children ?? [];
@@ -48,7 +63,7 @@ export const mockIpc = {
   reveal: () => ok(undefined),
   realPath: (p: string) => ok(p),
   takePendingOpens: () => ok([] as string[]),
-  openDoc: async (p: string) => (p.endsWith("系统架构.excalidraw") ? fetch("/scenes/large.excalidraw").then((r) => r.text()) : files.get(p) ?? empty),
+  openDoc: async (p: string) => (p === LARGE ? fetch("/scenes/large.excalidraw").then((r) => r.text()) : files.get(p) ?? empty),
   diskStatus: () => ok("same"),
   closeDoc: () => ok(undefined),
   saveDoc: (_: string, body: Uint8Array): Promise<SaveResult> => ok({ bytes: body.length, elements: 0, ms: 1 }),

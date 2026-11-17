@@ -1,6 +1,6 @@
 # Excalidesk
 
-一个快、离线优先的 [Excalidraw](https://github.com/excalidraw/excalidraw) macOS 桌面版，基于 Tauri 2。
+一个快、离线优先的 [Excalidraw](https://github.com/excalidraw/excalidraw) macOS 桌面版，基于 Tauri 2。官网：<https://linjiejim.github.io/excalidesk/>
 
 - **文件就是标准 `.excalidraw`**：工作区就是普通文件夹，excalidraw.com、Obsidian 插件、git 都能直接用
 - **iCloud Drive 同步**：把工作区放进 iCloud Drive 即可；显示上传 / 下载状态，外部修改按元素自动合并
@@ -51,6 +51,19 @@ npm run dev              # 只在浏览器里看界面（用假数据，不需�
 
 `npm run release` 仍然可以在本机打 dmg，但不生成更新包，不会推给已安装的 App。
 
+### 官网
+
+`site/` 是纯静态页面（HTML / CSS / JS，不用构建），改了 `site/` 推到 main，Site 工作流就把它发到 GitHub Pages。下载按钮在页面里查最新 release 的两个 dmg，发版不用改官网。
+
+截图和分享图是用浏览器版外壳（假数据）自动截的，界面改了就重新生成一次：
+
+```bash
+npm run dev                        # 另开一个终端
+node scripts/site-screens.mjs      # 中 / 英 × 浅 / 深 → site/screens/，再拼 site/og.png
+```
+
+需要 Node 22+（脚本用 Node 自带的 WebSocket）、Google Chrome 和 `cwebp`（`brew install webp`）。
+
 ## 目录
 
 ```
@@ -59,6 +72,7 @@ src/bench/        性能基准页（?bench=1）
 src-tauri/src/    Rust：文档模型与原子写、工作区扫描与 FSEvents、iCloud、菜单、120Hz、mcp/（Agent 协作）
 bench/            基准与自测脚本、测试场景生成
 docs/             方案、P0 性能实验结果、各阶段说明
+site/             官网（GitHub Pages）
 ```
 
 ## 设计要点

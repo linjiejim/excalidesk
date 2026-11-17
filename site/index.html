@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Excalidesk — Excalidraw, at home on your Mac</title>
+    <meta name="description" content="A fast, local-first Excalidraw desktop app for macOS. Plain .excalidraw files in folders you pick, iCloud Drive sync, 120Hz drawing, and Claude Code or Codex sketching with you over MCP. Free and open source." />
+    <meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#121214" media="(prefers-color-scheme: dark)" />
+    <link rel="icon" href="icon.png" />
+    <link rel="apple-touch-icon" href="icon.png" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://linjiejim.github.io/excalidesk/" />
+    <meta property="og:title" content="Excalidesk — Excalidraw, at home on your Mac" />
+    <meta property="og:description" content="Plain .excalidraw files, iCloud Drive sync, 120Hz drawing, and your coding agents sketching with you. Free and open source." />
+    <meta property="og:image" content="https://linjiejim.github.io/excalidesk/og.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="preload" href="fonts/excalifont-latin.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="screens/en/main-light.webp" as="image" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- Hand-drawn wobble for decorative outlines (never applied to text) -->
+    <svg width="0" height="0" style="position: absolute" aria-hidden="true">
+      <filter id="rough"><feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="3" /><feDisplacementMap in="SourceGraphic" scale="3" /></filter>
+    </svg>
+
+    <header class="nav">
+      <a class="brand" href="#top" aria-label="Excalidesk">
+        <img src="icon.png" alt="" width="30" height="30" />
+        <span>Excalidesk</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#speed" data-i18n="nav.speed">Speed</a>
+        <a href="#agents" data-i18n="nav.agents">Agents</a>
+        <a href="#files" data-i18n="nav.files">Files</a>
+        <a href="https://github.com/linjiejim/excalidesk">GitHub</a>
+      </nav>
+      <div class="nav-end">
+        <button class="lang" type="button" id="lang" aria-label="切换到中文">中文</button>
+        <a class="btn small primary" href="#download" data-i18n="nav.download">Download</a>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <p class="eyebrow" data-i18n="hero.eyebrow">Excalidraw for macOS · free &amp; open source</p>
+        <h1 data-i18n-html="hero.title">Excalidraw, <em>at home</em> on your Mac.</h1>
+        <p class="lede" data-i18n-html="hero.lede">A fast, local-first desktop app for Excalidraw. Every drawing is a plain <code>.excalidraw</code> file in a folder you pick, synced by iCloud Drive and drawn at 120Hz. Claude Code and Codex can sketch on it with you.</p>
+        <div class="cta">
+          <a class="btn primary dl-arm" href="https://github.com/linjiejim/excalidesk/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14" /></svg>
+            <span data-i18n="hero.download">Download for Mac</span>
+          </a>
+          <a class="btn ghost" href="https://github.com/linjiejim/excalidesk">
+            <svg viewBox="0 0 24 24" aria-hidden="true" class="gh"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.4c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.24-1.28-5.24-5.69 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.84 1.19 3.1 0 4.42-2.69 5.39-5.25 5.68.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5Z" /></svg>
+            <span data-i18n="hero.github">Source on GitHub</span>
+          </a>
+        </div>
+        <p class="meta">
+          <span data-i18n="hero.meta">macOS 13+ · Apple silicon (Intel build below) · MIT</span> · <a class="version" href="https://github.com/linjiejim/excalidesk/releases/latest">v0.6.0</a>
+        </p>
+
+        <!-- The app itself, with numbered notes pinned to its parts -->
+        <div class="stage" id="window">
+          <figure class="mac">
+            <img class="shot" id="shot" src="screens/en/main-light.webp" alt="Excalidesk: an iCloud Drive workspace in the sidebar, a drawing where Claude Code sketched two sign-in options and a flowchart, and a comment pinned to a button" width="2160" height="1350" />
+            <button class="pin" style="left: 14%; top: 9.2%" data-pin="1" type="button"><b>1</b></button>
+            <button class="pin" style="left: 46%; top: 13.5%" data-pin="2" type="button"><b>2</b></button>
+            <button class="pin" style="left: 41.5%; top: 53%" data-pin="3" type="button"><b>3</b></button>
+            <button class="pin" style="left: 41%; top: 85%" data-pin="4" type="button"><b>4</b></button>
+            <button class="pin" style="left: 39.5%; top: 97%" data-pin="5" type="button"><b>5</b></button>
+          </figure>
+        </div>
+        <ol class="legend">
+          <li data-pin="1"><b>1</b><span data-i18n-html="pin.1"><strong>Folders, not a library.</strong> A workspace is any folder, on iCloud Drive or off it. Every drawing is a <code>.excalidraw</code> file that opens anywhere.</span></li>
+          <li data-pin="2"><b>2</b><span data-i18n-html="pin.2"><strong>Agents draw in your drawing.</strong> What Claude Code adds is saved and versioned like your own edits, with one Undo.</span></li>
+          <li data-pin="3"><b>3</b><span data-i18n-html="pin.3"><strong>Press C to comment.</strong> Pin a note to any element. The agent gets it with what it points at, and marks it done.</span></li>
+          <li data-pin="4"><b>4</b><span data-i18n-html="pin.4"><strong>You decide when to send.</strong> The agent waits. Nothing goes back until you press Send.</span></li>
+          <li data-pin="5"><b>5</b><span data-i18n-html="pin.5"><strong>Saved, synced, kept.</strong> Incremental saves, live iCloud status, and local history to restore from.</span></li>
+        </ol>
+      </section>
+
+      <section class="numbers" aria-label="At a glance">
+        <div><b data-count="120">120</b><span data-i18n="num.fps">fps panning and drawing on ProMotion</span></div>
+        <div><b data-count="21">21</b><span data-i18n="num.mb">MB download, not a whole browser</span></div>
+        <div><b data-count="0">0</b><span data-i18n="num.accounts">accounts, servers or databases</span></div>
+        <div><b data-count="1">1</b><span data-i18n="num.format">file format: plain .excalidraw</span></div>
+      </section>
+
+      <!-- Speed -->
+      <section class="split" id="speed">
+        <div class="split-copy">
+          <h2 class="section-title" data-i18n-html="speed.title">Draws like Chrome. <span>Weighs like a Mac app.</span></h2>
+          <p class="section-lede" data-i18n="speed.lede">Mac apps that embed a web view get 60 fps, even on a 120Hz screen. Excalidesk lifts that cap, so panning and freehand strokes keep up with your hand at 120 fps, the same as Chrome.</p>
+          <ul class="ticks">
+            <li data-i18n-html="speed.t1"><strong>Saves without stalls.</strong> Only the elements that changed go to the Rust side, so a big drawing never freezes while it saves.</li>
+            <li data-i18n-html="speed.t2"><strong>Images cross once.</strong> Each image is sent the first time it appears, not re-encoded on every save.</li>
+            <li data-i18n-html="speed.t3"><strong>Scrolling isn't an edit.</strong> Your viewport stays out of the file, so panning around never triggers an iCloud upload.</li>
+          </ul>
+        </div>
+        <div class="fps card sketchy">
+          <p class="fps-title" data-i18n="speed.chart">Frame rate panning at 100% zoom, M1 Pro with ProMotion</p>
+          <div class="bar-row">
+            <span data-i18n="speed.default">Web view, default</span>
+            <div class="bar"><i style="--w: 50%"></i></div>
+            <b>60 <small>fps · 17 ms</small></b>
+          </div>
+          <div class="bar-row hot">
+            <span>Excalidesk</span>
+            <div class="bar"><i style="--w: 100%"></i></div>
+            <b>120 <small>fps · 8 ms</small></b>
+          </div>
+          <div class="bar-row">
+            <span>Chrome</span>
+            <div class="bar"><i style="--w: 100%"></i></div>
+            <b>120 <small>fps · 8 ms</small></b>
+          </div>
+          <p class="hz"><span data-i18n="speed.yours">Your screen, right now:</span> <b id="hz">…</b></p>
+        </div>
+      </section>
+
+      <!-- Agents -->
+      <section class="agents" id="agents">
+        <h2 class="section-title" data-i18n-html="agents.title">Sketch it out <span>with your agents.</span></h2>
+        <p class="section-lede" data-i18n="agents.lede">Claude Code, Codex and other MCP clients open drawings in Excalidesk and sketch prototypes, flows and architectures, one option per frame. You edit right on the canvas or pin comments, then send it back. They revise and reply.</p>
+        <ol class="loop">
+          <li class="card sketchy"><span class="n">1</span><h3 data-i18n="loop.1t">The agent sketches</h3><p data-i18n="loop.1d">Wireframes, flowcharts, Mermaid diagrams, all as editable shapes. It renders a PNG to check its own work.</p></li>
+          <li class="card sketchy"><span class="n">2</span><h3 data-i18n="loop.2t">You mark it up</h3><p data-i18n="loop.2d">Move, delete or retype anything. Or select a shape and press C to pin a note to it.</p></li>
+          <li class="card sketchy"><span class="n">3</span><h3 data-i18n="loop.3t">You send it back</h3><p data-i18n="loop.3d">The agent gets your open notes and what they point at, every change you made, and an annotated PNG.</p></li>
+          <li class="card sketchy"><span class="n">4</span><h3 data-i18n="loop.4t">It revises and replies</h3><p data-i18n="loop.4d">Each note is marked done with a one-line reply. Go around again until it's right.</p></li>
+        </ol>
+        <div class="setup">
+          <div class="term">
+            <div class="term-bar"><i></i><i></i><i></i><span data-i18n="agents.term">Connect an agent</span></div>
+            <div class="cmd"><span class="who">Claude Code</span><code>claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp</code><button class="copy" type="button" data-i18n="copy">Copy</button></div>
+            <div class="cmd"><span class="who">Codex</span><code>codex mcp add excalidesk -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp</code><button class="copy" type="button" data-i18n="copy">Copy</button></div>
+          </div>
+          <ul class="ticks small">
+            <li data-i18n-html="agents.t1"><strong>Nothing to start.</strong> The first call opens Excalidesk in the background. The command is also in Settings (⌘,) → Agent.</li>
+            <li data-i18n-html="agents.t2"><strong>Several at once.</strong> Each agent works in its own background tab and never steals the drawing in front of you.</li>
+            <li data-i18n-html="agents.t3"><strong>Fenced in.</strong> Agents only reach drawings in your workspaces, and one switch in Settings turns them off.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- Files -->
+      <section class="split reverse" id="files">
+        <div class="split-copy">
+          <h2 class="section-title" data-i18n-html="files.title">Your drawings are <span>just files.</span></h2>
+          <p class="section-lede" data-i18n="files.lede">No library, no import, no lock-in. A workspace is a folder, and each drawing is a standard .excalidraw file that excalidraw.com, the Obsidian plugin and git read as is.</p>
+          <ul class="ticks">
+            <li data-i18n-html="files.t1"><strong>iCloud Drive, with status.</strong> See each file upload and download. Files still in the cloud download when you open them.</li>
+            <li data-i18n-html="files.t2"><strong>Edits from elsewhere, merged.</strong> Changed on another Mac, in git or by a script? Excalidesk merges element by element instead of overwriting, conflict copies included.</li>
+            <li data-i18n-html="files.t3"><strong>Local history.</strong> Snapshots as you work and before every merge. Restore one, or save it as a copy.</li>
+            <li data-i18n-html="files.t4"><strong>Careful writes.</strong> Atomic saves through macOS file coordination. If a file is deleted or moved behind its back, Excalidesk stops saving rather than bring it back.</li>
+          </ul>
+        </div>
+        <div class="finder card sketchy" aria-hidden="true">
+          <div class="finder-bar"><i></i><i></i><i></i><span>iCloud Drive › Excalidraw</span></div>
+          <ul class="tree">
+            <li class="dir"><span class="ico">▾</span><span data-i18n="tree.arch">Architecture</span></li>
+            <li class="file l2"><span class="ico doc"></span><span data-i18n="tree.f1">system-overview</span><em>.excalidraw</em><span class="st ok" data-i18n="tree.synced">synced</span></li>
+            <li class="file l2"><span class="ico doc"></span><span data-i18n="tree.f2">data-flow</span><em>.excalidraw</em><span class="st down" data-i18n="tree.cloud">in iCloud</span></li>
+            <li class="dir"><span class="ico">▾</span><span data-i18n="tree.product">Product</span></li>
+            <li class="file l2 on"><span class="ico doc"></span><span data-i18n="tree.f3">home-redesign</span><em>.excalidraw</em><span class="st up" data-i18n="tree.up">uploading</span></li>
+            <li class="file l2"><span class="ico doc"></span><span data-i18n="tree.f4">user-journey</span><em>.excalidraw</em><span class="st ok" data-i18n="tree.synced">synced</span></li>
+          </ul>
+          <div class="opens">
+            <span data-i18n="files.opens">Opens as is in</span>
+            <b>excalidraw.com</b><b>Obsidian</b><b>git</b>
+          </div>
+        </div>
+      </section>
+
+      <!-- The rest -->
+      <section class="more">
+        <h2 class="section-title" data-i18n-html="more.title">And the <span>small things.</span></h2>
+        <div class="grid">
+          <article class="card"><h3 data-i18n="m1.t">Tabs and a real menu bar</h3><p data-i18n="m1.d">Native menus and shortcuts, tabs, and double-click any .excalidraw in Finder to open it.</p></article>
+          <article class="card"><h3 data-i18n="m2.t">A sidebar that keeps up</h3><p data-i18n="m2.d">Right-click menus, double-click to rename, drag workspaces into order, sort by modified, created or name.</p></article>
+          <article class="card"><h3 data-i18n="m3.t">Light, dark or system</h3><p data-i18n="m3.d">The canvas and the window follow the same theme, in English or 中文.</p></article>
+          <article class="card"><h3 data-i18n="m4.t">PNG and SVG export</h3><p data-i18n="m4.d">Comments are left out of exports automatically. In excalidraw.com they show up as plain sticky notes.</p></article>
+          <article class="card"><h3 data-i18n="m5.t">Updates itself</h3><p data-i18n="m5.d">Checks GitHub Releases, verifies each update against a key built into the app, and installs it when you restart.</p></article>
+          <article class="card"><h3 data-i18n="m6.t">Official Excalidraw inside</h3><p data-i18n="m6.d">The official package, not a fork, fully offline with its fonts bundled. Same editor, same files.</p></article>
+        </div>
+      </section>
+
+      <!-- Download -->
+      <section class="download" id="download">
+        <img src="icon.png" alt="" width="96" height="96" class="dl-icon" />
+        <h2 class="section-title" data-i18n="dl.title">Get Excalidesk</h2>
+        <p class="section-lede" data-i18n="dl.lede">Free and open source under the MIT license. Needs macOS 13 Ventura or later.</p>
+        <div class="cta">
+          <a class="btn primary dl-arm" href="https://github.com/linjiejim/excalidesk/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14" /></svg>
+            <span data-i18n="dl.arm">Apple silicon</span><small class="dl-size"></small>
+          </a>
+          <a class="btn ghost dl-intel" href="https://github.com/linjiejim/excalidesk/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0-5-5m5 5 5-5M5 21h14" /></svg>
+            <span data-i18n="dl.intel">Intel</span><small class="dl-size"></small>
+          </a>
+        </div>
+        <p class="meta"><a href="https://github.com/linjiejim/excalidesk/releases" data-i18n="dl.all">All releases and notes</a> · <span class="version-text">v0.6.0</span></p>
+        <div class="note">
+          <p data-i18n-html="dl.gatekeeper"><strong>First launch:</strong> Excalidesk isn't notarized by Apple yet, so macOS blocks it the first time. Open <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b>. From then on it updates itself.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <p data-i18n-html="foot.text">Excalidesk is an independent project built on the open-source <a href="https://github.com/excalidraw/excalidraw">Excalidraw</a> and isn't affiliated with it. Hand-drawn lettering in Excalifont (SIL OFL 1.1).</p>
+      <p><a href="https://github.com/linjiejim/excalidesk">GitHub</a> · <a href="https://github.com/linjiejim/excalidesk/blob/main/LICENSE">MIT</a> · <span>© 2026 Jim Lin</span></p>
+    </footer>
+
+    <script src="main.js" defer></script>
+  </body>
+</html>

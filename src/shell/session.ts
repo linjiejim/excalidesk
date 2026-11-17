@@ -195,10 +195,13 @@ export class DocSession {
     this.viewportTimer = window.setTimeout(() => this.saveViewport({ scrollX, scrollY, zoom: zoom.value }), 1000);
   };
 
+  /** 放映中：要记的视口是进入放映前的镜头，不是对准某一页的那个（切标签、关标签、退出时都会记视口） */
+  viewportOverride: Viewport | null = null;
+
   saveViewport(vp?: Viewport) {
     clearTimeout(this.viewportTimer);
     const a = this.api?.getAppState();
-    const v = vp ?? (a ? { scrollX: a.scrollX, scrollY: a.scrollY, zoom: a.zoom.value } : null);
+    const v = this.viewportOverride ?? vp ?? (a ? { scrollX: a.scrollX, scrollY: a.scrollY, zoom: a.zoom.value } : null);
     if (!v || this.missing) return;
     getState().viewports[this.path] = v;
     ipc.setViewport(this.path, v);

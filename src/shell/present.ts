@@ -203,6 +203,7 @@ export function startPresentation(fromStart = false) {
     raf: 0, tweening: false, fitKey: "", off: [],
   };
   ctl = c;
+  s.viewportOverride = { scrollX: st.scrollX, scrollY: st.scrollY, zoom: st.zoom.value };
   api.updateScene({
     appState: {
       viewModeEnabled: true, zenModeEnabled: true,
@@ -236,7 +237,13 @@ export function startPresentation(fromStart = false) {
       if (ctl === c && (g.active !== c.path || sessions.get(c.path) !== c.s || c.s.api !== c.api)) stopPresentation();
     }),
   );
-  if (!c.wasFullscreen) void setFullscreen(true);
+  // 启动时就是全屏的窗口，store 里的 fullscreen 还没被 onResized 更新过：直接问窗口
+  void (async () => {
+    if (!inTauri) return;
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    c.wasFullscreen = await getCurrentWindow().isFullscreen().catch(() => c.wasFullscreen);
+    if (!c.wasFullscreen && ctl === c) await setFullscreen(true);
+  })();
   refresh();
   requestAnimationFrame(() => show(slides, i, false));
 }
@@ -249,11 +256,19 @@ export function stopPresentation() {
   c.off.forEach((f) => f());
   document.documentElement.removeAttribute("data-laser");
   if (c.s.api === c.api) {
-    // 先退出只读模式，再换回原来的工具（只读模式下有些工具换不进去）
-    c.api.updateScene({ appState: c.saved, captureUpdate: CaptureUpdateAction.NEVER });
+    // 先退出只读模式，再换回原来的工具（只读模式下有些工具换不进去）。
+    // 只读模式一切换，Excalidraw 会在 componentDidUpdate 里清空选择，所以选择晚一帧再放回去
+    const { selectedElementIds, selectedGroupIds, ...rest } = c.saved;
+    c.api.updateScene({ appState: rest, captureUpdate: CaptureUpdateAction.NEVER });
     const tool = c.tool;
     c.api.setActiveTool(tool.type === "custom" ? { type: "custom", customType: tool.customType } : { type: tool.type });
+    requestAnimationFrame(() => {
+      if (c.s.api === c.api) c.api.updateScene({ appState: { selectedElementIds, selectedGroupIds }, captureUpdate: CaptureUpdateAction.NEVER });
+    });
   }
+  // 放映中被切走、关掉时已经按放映前的镜头记过视口；这里再记一次，然后恢复正常记录
+  c.s.saveViewport();
+  c.s.viewportOverride = null;
   setState({ presenting: null });
   if (!c.wasFullscreen) void setFullscreen(false);
 }

@@ -107,9 +107,10 @@ export async function renderPdf(api: any, title: string, progress?: (i: number, 
   const bg = api.getAppState().viewBackgroundColor ?? "#ffffff";
   const notes = new Set(all.filter(isNotesFrame).map((f) => f.id));
   const content = all.filter((e) => !notes.has(e.id) && !notes.has(e.frameId ?? ""));
-  // 放映时框里看到的东西：页里的元素，加上压在页上的其他元素
+  // 放映时框里看到的东西：页里的元素，加上压在页上的、不属于别的 frame 的元素。
+  // 具体压没压上交给 exportingFrame（Excalidraw 按真实范围算，线和箭头按点）
   const jobs = slides.length
-    ? slides.map((sl) => ({ frame: sl.frame as El | null, els: content.filter((e) => e.id === sl.frame.id || e.frameId === sl.frame.id || overlaps(e, sl.frame)) }))
+    ? slides.map((sl) => ({ frame: sl.frame as El | null, els: content.filter((e) => !e.frameId || e.frameId === sl.frame.id) }))
     : [{ frame: null as El | null, els: content }];
   const pages: PdfPage[] = [];
   for (const [k, job] of jobs.entries()) {
@@ -126,7 +127,8 @@ export async function renderPdf(api: any, title: string, progress?: (i: number, 
         return { width: Math.round(w * scale), height: Math.round(h * scale), scale };
       },
     });
-    const image = job.els.some((e) => e.type === "image") ? await jpegImage(canvas) : await flateImage(canvas);
+    const hasImage = job.els.some((e) => e.type === "image" && (!job.frame || e.frameId === job.frame.id || overlaps(e, job.frame)));
+    const image = hasImage ? await jpegImage(canvas) : await flateImage(canvas);
     const fit = Math.min(1, MAX_PT / (Math.max(canvas.width, canvas.height) / scale));
     pages.push({ w: (canvas.width / scale) * fit, h: (canvas.height / scale) * fit, image });
     // 一页一页地让出线程，别把界面卡死

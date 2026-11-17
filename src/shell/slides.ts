@@ -15,8 +15,10 @@ const NOTES_PAD = 40;
 export type Slide = { frame: El; notes: El[]; notesText: string };
 
 const isFrameLike = (e: El) => !e.isDeleted && (e.type === "frame" || e.type === "magicframe");
-const NOTES_NAME = /^\s*(备注|notes)/i;
-export const isNotesFrame = (e: El) => isFrameLike(e) && (!!ext(e)?.notesFor || NOTES_NAME.test(e.name ?? ""));
+/** 「备注」「Notes」整个词，后面没别的或者跟着分隔符：「Notes app redesign」「Notes & refs」不算 */
+const NOTES_NAME = /^\s*(备注|notes)\s*($|[·:：\-—–(（|/])/i;
+/** 固定页（slide 标记）永远是页，名字叫什么都不算备注 */
+export const isNotesFrame = (e: El) => isFrameLike(e) && !ext(e)?.slide && (!!ext(e)?.notesFor || NOTES_NAME.test(e.name ?? ""));
 export const isFixedSlide = (e: El) => isFrameLike(e) && !!ext(e)?.slide;
 
 /** 先行后列：按顶边排，垂直中线落在当前行上下范围内的归进这一行，行内从左到右 */

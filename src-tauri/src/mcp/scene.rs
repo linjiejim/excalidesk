@@ -195,10 +195,19 @@ fn f(e: &Value, k: &str) -> f64 {
     e.get(k).and_then(Value::as_f64).unwrap_or(0.0)
 }
 
-/// 名字以「备注 / Notes」开头的 frame（手画的）或带 notesFor 的 frame 是备注
+/// 带 notesFor 的 frame，或名字是「备注 / Notes」整个词（后面没别的或跟着分隔符，手画的）是备注。
+/// 固定页（slide 标记）永远是页，名字叫什么都不算
 fn is_notes(fr: &Fr) -> bool {
+    if fr.fixed {
+        return false;
+    }
     let n = fr.name.unwrap_or("").trim_start();
-    fr.notes_for.is_some() || n.starts_with("备注") || n.to_lowercase().starts_with("notes")
+    let rest = n.strip_prefix("备注").or_else(|| n.get(..5).filter(|h| h.eq_ignore_ascii_case("notes")).map(|_| &n[5..]));
+    let name_says = rest.is_some_and(|r| {
+        let r = r.trim_start();
+        r.is_empty() || r.starts_with(['·', ':', '：', '-', '—', '–', '(', '（', '|', '/'])
+    });
+    fr.notes_for.is_some() || name_says
 }
 
 /// 先行后列：按顶边排，垂直中线落在当前行上下范围内的归进这一行，行内从左到右
@@ -624,6 +633,24 @@ mod tests {
         let v = overview(&s, 100);
         assert_eq!(v["slides"].as_array().unwrap().len(), 3);
         assert_eq!(v["frames"].as_array().unwrap().iter().filter(|f| f.get("notesFor").is_some()).count(), 4);
+    }
+
+    #[test]
+    fn notes_by_name_only_whole_word() {
+        let mut fixed = frame("f", "Notes & references", 0.0, 0.0, 1920.0, 1080.0);
+        fixed["customData"] = json!({ "excalidesk": { "slide": true } });
+        let mut fixed_plain = frame("g", "备注", 2080.0, 0.0, 1920.0, 1080.0);
+        fixed_plain["customData"] = json!({ "excalidesk": { "slide": true } });
+        let s = simplify(&[
+            fixed,
+            fixed_plain,
+            frame("app", "Notes app redesign", 4160.0, 0.0, 1920.0, 1080.0),
+            frame("n1", "notes: intro", 0.0, 1160.0, 1920.0, 400.0),
+            frame("n2", "备注（第二页）", 2080.0, 1160.0, 1920.0, 400.0),
+        ]);
+        assert_eq!(order_of(&s), vec!["f", "g", "app"]);
+        assert_eq!(s.notes_owner.get("n1").map(String::as_str), Some("f"));
+        assert_eq!(s.notes_owner.get("n2").map(String::as_str), Some("g"));
     }
 
     #[test]

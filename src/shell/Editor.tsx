@@ -15,7 +15,7 @@ const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: null },
 };
 
-function EditorImpl({ session, theme, lang }: { session: DocSession; theme: "light" | "dark"; lang: "zh" | "en" }) {
+function EditorImpl({ session, theme, lang, presenting = false }: { session: DocSession; theme: "light" | "dark"; lang: "zh" | "en"; presenting?: boolean }) {
   const initialData = useMemo(() => session.initialData(), [session]);
   const onApi = useCallback((api: unknown) => session.attach(api), [session]);
   useEffect(() => () => session.attach(null), [session]);
@@ -43,6 +43,8 @@ function EditorImpl({ session, theme, lang }: { session: DocSession; theme: "lig
         onChange={session.onChange as any}
         onScrollChange={session.onScroll as any}
         theme={theme}
+        // 放映时不画网格：用 prop 盖住，不改 state（gridModeEnabled 会存进文件）
+        gridModeEnabled={presenting ? false : undefined}
         UIOptions={UI_OPTIONS}
         langCode={lang === "zh" ? "zh-CN" : "en"}
       >

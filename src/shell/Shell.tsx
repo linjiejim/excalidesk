@@ -36,8 +36,12 @@ function useSystemDark() {
   return dark;
 }
 
+/** 放映中只放行这些菜单项：其他的（历史、导出、设置、新建页…）会在遮罩下面打开，或者用到放映时的 appState */
+const WHILE_PRESENTING = new Set(["present", "present_start", "save", "close_tab", "next_tab", "prev_tab", "check_updates"]);
+
 function onMenu(id: string) {
   const { active } = getState();
+  if (isPresenting() && !WHILE_PRESENTING.has(id)) return;
   switch (id) {
     case "new": return newDoc();
     case "open": return openFileDialog();
@@ -56,13 +60,8 @@ function onMenu(id: string) {
     case "check_updates": return checkForUpdates(true);
     case "present": return togglePresentation();
     case "present_start": return togglePresentation(true);
-  }
-  // 放映中不改图、不导出
-  if (isPresenting()) return;
-  const s = active ? sessions.get(active) : null;
-  switch (id) {
-    case "new_slide": return newSlide(s);
-    case "add_notes": return addNotes(s);
+    case "new_slide": return newSlide(active ? sessions.get(active) : null);
+    case "add_notes": return addNotes(active ? sessions.get(active) : null);
     case "export_pdf": return exportPdf();
   }
 }
@@ -531,6 +530,7 @@ function Opening({ tab }: { tab: Tab }) {
 
 function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en" }) {
   const t = useT();
+  const presenting = useShell((s) => !!s.presenting);
   const tab = useShell((s) => s.tabs.find((x) => x.path === s.active));
   if (!tab) return <Welcome />;
   const session = sessions.get(tab.path);
@@ -553,7 +553,7 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
       ) : null}
       {tab.phase === "ready" && session ? (
         <>
-          <Editor session={session} theme={theme} lang={lang} />
+          <Editor session={session} theme={theme} lang={lang} presenting={presenting} />
           <AgentBar tab={tab} />
           <CommentPopover path={tab.path} />
           <PresentOverlay />

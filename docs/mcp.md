@@ -37,11 +37,11 @@ Agent 没在等时点「发回」：先记下来，下次 `wait_for_feedback` / 
 |---|---|
 | `list_drawings` | 工作区里的图（新的在前）和已打开的标签 |
 | `open_drawing` | 打开或新建（`create` + 可选 `dir`），默认后台标签 |
-| `read_drawing` | 紧凑 JSON：frames、元素 `{id,type,x,y,w,h,text,…,by}`、批注；并把当前状态记为「看过」 |
+| `read_drawing` | 紧凑 JSON：frames、元素 `{id,type,x,y,w,h,text,…,by}`、批注、`slides`（按放映顺序，带演讲者备注）；并把当前状态记为「看过」 |
 | `render_drawing` | 整张 / 一个 frame / 几个元素 → PNG |
-| `draw` | Excalidraw skeleton 格式加元素：`frame` 自动排到已有内容右边，`style` 选 clean / sketch，箭头按 id 绑定；元素带 `"order":"back"` 放到最底层（底板、泳道）；删掉的元素的 id 可以再用 |
-| `draw_mermaid` | Mermaid → 可编辑元素（流程图、时序图等） |
-| `update_elements` | 改位置、尺寸、文字 / 标签、颜色样式、箭头头部、图层（`order`: front / back）、链接、frame 名；连着的箭头跟着重新走线；没生效的字段放在 `ignored` 里并说明原因 |
+| `draw` | Excalidraw skeleton 格式加元素：`frame` 自动排到已有内容右边，`style` 选 clean / sketch，箭头按 id 绑定；元素带 `"order":"back"` 放到最底层（底板、泳道）；删掉的元素的 id 可以再用。`slide: true` 画在幻灯片上，`notes` 写演讲者备注（见下文「演示文稿」） |
+| `draw_mermaid` | Mermaid → 可编辑元素（流程图、时序图等）；`slide: true` 放进一页幻灯片 |
+| `update_elements` | 改位置、尺寸、文字 / 标签、颜色样式、箭头头部、图层（`order`: front / back）、链接、frame 名；连着的箭头跟着重新走线；挪页时它的备注跟着走；没生效的字段放在 `ignored` 里并说明原因 |
 | `delete_elements` | 删元素（标签、frame 内容一起）；用户批注不许删 |
 | `get_feedback` | 上次看过之后用户的批注和改动 |
 | `wait_for_feedback` | 等用户点「发回」，返回 get_feedback 的内容 + PNG；超时返回「还没有反馈」 |
@@ -54,6 +54,16 @@ Agent 没在等时点「发回」：先记下来，下次 `wait_for_feedback` / 
 - 数组顺序就是图层顺序（从下到上）。`order` 让元素连同标签挪到最下或最上；在 frame 里只在这个 frame 的范围里挪，不跑出 frame 那一段。挪过的元素抬版本、重新分配 fractional index；撤销时连顺序一起复原。
 - frame 没有填充：给 frame 设 `backgroundColor` 不会生效，Agent 会在 `ignored` 里看到提示：在 frame 里画个矩形，加 `order: "back"`。不认识的字段、给非箭头设箭头头部、给非 frame 设 `name` 也一样，不再静默忽略。
 - 删除是软删除（文件里留着 `isDeleted` 的记录），所以删掉的 id 仍在文件里。`draw` 允许复用这样的 id：新元素的版本压过删除记录（合并时胜出），并放在最上面。
+
+## 演示文稿
+
+2026-11-17 起，设计见 [specs/20261117-presentation-mode.md](specs/20261117-presentation-mode.md)。
+
+- 图里每个 frame 都是一页，先行后列地放映（一行横排就是从左到右）。用户用 演示 → 从当前页开始（⌥⌘P）放映，文件 → 导出 PDF… 导出。
+- `draw` 带 `slide: true`：`frame` 是已有的 frame 就画进去，否则在最后一页右边 160 处新建一页 1920×1080 的固定页（`customData.excalidesk.slide`）。元素坐标是页内坐标；不能和 `at` 一起用。`elements` 可以为空（只建页或只写备注）。
+- 固定页不撑大：不管哪个工具往里加，伸出页边的元素都列在返回值的 `overflow` 里（放映和 PDF 会裁掉）。普通 frame 照旧撑大。
+- `notes`：在页下方 80 处建备注 frame（`customData.excalidesk.notesFor`，和页同宽，高 480，文字长就撑高），已有就替换里面的文字。备注 frame 不算页。
+- `read_drawing` 的 `slides`：`[{id, name, x, y, w, h, fixed?, notes?, notesFrame?}]`；`frames` 里的备注 frame 带 `notesFor`。排序和配对在 Rust（`scene.rs`）和前端（`src/shell/slides.ts`）各有一份，规则一样。
 
 ## 多个 Agent
 
@@ -88,8 +98,8 @@ Agent ──stdio MCP──▶ excalidesk --mcp ──Unix socket──▶ Excal
 
 ## 验证
 
-- `cargo test --lib mcp`：9 个（场景简化、差异、基线吸收、参数解包、新文件夹路径解析、协议往返）。
-- `bench/mcp-e2e.py`：真 App + 真 `--mcp` 进程，临时工作区和单独 socket，43 步全过（新加了图层、复用 id、`ignored`、箭头头部 12 步，核对文件里的数组顺序和 index 一致）。App 以 `--mcp-selftest` 启动，Agent 一进入等待，前端就替用户给 id 为 `login` 的元素加批注并点「发回」（只演一次）。覆盖：握手、新建、画（含元素被编码成字符串）、重复 id、Mermaid、读、渲染、外部修改算用户改动、等待并收到批注、两个 Agent 各自收到同一次发回、改图、加 / 去标签、不许删批注、处理批注、Agent 自己的改动不回报、工作区外拒绝（不建文件夹）、同时新建同名图、两个 Agent 并行。
+- `cargo test --lib mcp`：12 个（场景简化、差异、基线吸收、参数解包、新文件夹路径解析、协议往返、放映顺序、备注配对、固定页标记）。
+- `bench/mcp-e2e.py`：真 App + 真 `--mcp` 进程，临时工作区和单独 socket，55 步全过（2026-11-17 加了幻灯片 12 步）；当初是 43 步全过（新加了图层、复用 id、`ignored`、箭头头部 12 步，核对文件里的数组顺序和 index 一致）。App 以 `--mcp-selftest` 启动，Agent 一进入等待，前端就替用户给 id 为 `login` 的元素加批注并点「发回」（只演一次）。覆盖：握手、新建、画（含元素被编码成字符串）、重复 id、Mermaid、读、渲染、外部修改算用户改动、等待并收到批注、两个 Agent 各自收到同一次发回、改图、加 / 去标签、不许删批注、处理批注、Agent 自己的改动不回报、工作区外拒绝（不建文件夹）、同时新建同名图、两个 Agent 并行。
 - 浏览器预览里用 `window.__agent` 验过并发场景：Agent 写入途中用户加元素、挪同一个元素、删 frame 时里面的批注、同一批先加标签再挪容器、操作途中关掉图。
 - Codex 审了 3 轮（`codex review --uncommitted`，后两轮只看修复）：第 1 轮 9 条、第 2 轮 6 条、第 3 轮 1 条，全部修了；没有留下未修的。
 - 用真 Agent 跑过一轮：`codex exec`（临时 `-c mcp_servers.excalidesk…`，没改全局配置）画了手机登录页 → 等反馈 → 收到「make the button green」→ 改绿 → 回复并处理批注。它第一次把元素编码成 JSON 字符串传进来被拒，之后服务端改成自动解包。

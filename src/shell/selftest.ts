@@ -6,6 +6,9 @@ import { t } from "./i18n";
 import { sortTree } from "./Shell";
 import { ipc } from "./ipc";
 import { getState, setState, updateSettings } from "./store";
+import { startPresentation } from "./present";
+import { exportPdf, renderPdf } from "./pdf";
+import { addNotes, buildFrame, newSlide, slidesOf } from "./slides";
 
 type Step = { name: string; ok: boolean; ms: number; detail?: unknown };
 
@@ -290,6 +293,142 @@ export async function runSelftest() {
     const recent = (await ipc.state()).recent;
     if (recent.includes(gone)) throw new Error("还在最近打开里");
     return "ok";
+  });
+
+  // 演示（docs/specs/20261117-presentation-mode.md）：两页一行 + 第二行一页，第一页下面有备注
+  const deck = `${dir}/演示.excalidraw`;
+  const key = (k: string, code = k) => window.dispatchEvent(new KeyboardEvent("keydown", { key: k, code, bubbles: true, cancelable: true }));
+  await step("演示：先行后列地翻页、遮罩、备注、退出后原样恢复", async () => {
+    const a = buildFrame({ x: 0, y: 0, w: 1920, h: 1080 }, "A", { slide: true });
+    const b = buildFrame({ x: 2080, y: 0, w: 1920, h: 1080 }, "B");
+    const c = buildFrame({ x: 0, y: 2000, w: 1920, h: 1080 }, "C");
+    const n = buildFrame({ x: 0, y: 1160, w: 1920, h: 480 }, "Notes", { notesFor: a.id });
+    const note = convertToExcalidrawElements([{ type: "text", x: 40, y: 1200, text: "note one" } as any], { regenerateIds: false })[0] as any;
+    await write(deck, { type: "excalidraw", version: 2, elements: [b, c, a, n, { ...note, frameId: n.id }, { ...rect(100, 100), frameId: a.id }], appState: {}, files: {} });
+    await openPath(deck);
+    await waitFor(() => ready(deck));
+    const api = session(deck).api;
+    await sleep(300);
+    // 进入前选中一页（选择工具），退出后选择要回来（矩形等工具本身会清空选择，工具另外测）
+    api.updateScene({ appState: { selectedElementIds: { [b.id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
+    await sleep(100);
+    const before = api.getAppState();
+    startPresentation(true);
+    await waitFor(() => getState().presenting?.index === 0 && api.getAppState().viewModeEnabled);
+    const p0 = getState().presenting!;
+    if (p0.total !== 3 || p0.notesText !== "note one") throw new Error(`total ${p0.total} notes ${p0.notesText}`);
+    const fr = api.getAppState().frameRendering;
+    if (fr.name || fr.outline || !fr.clip) throw new Error(`frameRendering ${JSON.stringify(fr)}`);
+    // 进全屏要有权限（core:window:allow-set-fullscreen）
+    const full = await waitFor(() => getState().fullscreen, 6000).catch(() => false);
+    await waitFor(() => (document.querySelector<HTMLElement>(".present-mask")?.offsetWidth ?? 0) > 100);
+    const order: string[] = [];
+    const at = () => slidesOf(api.getSceneElements())[getState().presenting!.index].frame.name;
+    order.push(at());
+    key("ArrowRight");
+    await waitFor(() => getState().presenting?.index === 1);
+    order.push(at());
+    key(" ", "Space");
+    await waitFor(() => getState().presenting?.index === 2);
+    order.push(at());
+    key("Home");
+    await waitFor(() => getState().presenting?.index === 0);
+    if (order.join() !== "A,B,C") throw new Error(`顺序 ${order}`);
+    // 页铺满一个方向（不是 0.1 一档的缩放）
+    await sleep(500);
+    const st = api.getAppState();
+    const fill = Math.max((1920 * st.zoom.value) / st.width, (1080 * st.zoom.value) / st.height);
+    if (Math.abs(fill - 1) > 0.01) throw new Error(`铺满比例 ${fill}`);
+    key("Escape");
+    await waitFor(() => !getState().presenting);
+    await sleep(200);
+    const after = api.getAppState();
+    const same = ["viewModeEnabled", "zenModeEnabled", "scrollX", "scrollY"].every((k) => after[k] === before[k]) && after.zoom.value === before.zoom.value && after.frameRendering.name === before.frameRendering.name
+      && after.selectedElementIds[b.id] === true;
+    if (!same) throw new Error(`没恢复 ${JSON.stringify({ before: [before.scrollX, before.zoom.value, before.viewModeEnabled], after: [after.scrollX, after.zoom.value, after.viewModeEnabled, Object.keys(after.selectedElementIds), after.activeTool.type] })}`);
+    // 记下的视口是放映前的镜头，不是某一页的
+    const vp = getState().viewports[deck];
+    if (vp && (vp.zoom !== before.zoom.value || vp.scrollX !== before.scrollX)) throw new Error(`视口记成了放映时的 ${JSON.stringify(vp)}`);
+    // 等第一次退出全屏做完，再测：用矩形工具时开始放映，退出后还是矩形工具
+    if (full) await waitFor(() => !getState().fullscreen, 6000);
+    await sleep(800);
+    api.setActiveTool({ type: "rectangle" });
+    await sleep(100);
+    startPresentation(true);
+    await waitFor(() => getState().presenting?.index === 0);
+    await sleep(300);
+    key("Escape");
+    await waitFor(() => !getState().presenting);
+    await sleep(200);
+    const tool = api.getAppState().activeTool.type;
+    api.setActiveTool({ type: "selection" });
+    if (tool !== "rectangle") throw new Error(`工具没恢复：${tool}`);
+    if (full) await waitFor(() => !getState().fullscreen, 8000);
+    if (tabOf(deck)?.save !== "saved") throw new Error(`放映把文件标脏了：${tabOf(deck)?.save}`);
+    if (!full) throw new Error("没有进全屏");
+    return { order, fill: Number(fill.toFixed(3)), fullscreen: full };
+  });
+
+  // 和 Rust（mcp/scene.rs 的测试）同一组用例：两边规则不能分叉
+  await step("演示：排序和备注配对（和 Rust 同一组用例）", async () => {
+    const fr = (id: string, name: string, x: number, y: number, w: number, h: number, ex?: Record<string, unknown>) => ({ ...buildFrame({ x, y, w, h }, name, ex), id });
+    const txt = (id: string, frameId: string, y: number, text: string) => ({ ...(convertToExcalidrawElements([{ type: "text", x: 0, y, text } as any], { regenerateIds: false })[0] as any), id, frameId });
+    const ids = (els: any[]) => slidesOf(els).map((x) => x.frame.id).join();
+    const rows = ids([fr("c", "C", 0, 2000, 1920, 1080), fr("b", "B", 2080, 100, 1920, 800), fr("a", "A", 0, 0, 1920, 1080)]);
+    if (rows !== "a,b,c") throw new Error(`先行后列 ${rows}`);
+    const els = [
+      fr("a", "A", 0, 0, 1920, 1080), fr("b", "B", 2080, 0, 1920, 1080), fr("c", "C", 4160, 0, 1920, 1080),
+      fr("n1", "Notes", 0, 1160, 1920, 480, { notesFor: "a" }), fr("n2", "Notes", 2080, 1160, 1920, 480, { notesFor: "a" }),
+      fr("n3", "备注", 9000, 5000, 1920, 480, { notesFor: "c" }), fr("hand", "备注 · 第二页", 2100, 1300, 1800, 300),
+      txt("t1", "n1", 1200, "first"), txt("t3", "n2", 1300, "second, lower"), txt("t2", "n2", 1200, "second"), txt("t4", "n3", 5100, "third"), txt("t5", "hand", 1350, "by hand"),
+    ];
+    const sl = slidesOf(els);
+    const notes = sl.map((x) => x.notesText);
+    if (sl.map((x) => x.frame.id).join() !== "a,b,c" || notes[0] !== "first" || notes[1] !== "second\n\nsecond, lower\n\nby hand" || notes[2] !== "third") throw new Error(`配对 ${JSON.stringify(notes)}`);
+    const named = ids([
+      fr("f", "Notes & references", 0, 0, 1920, 1080, { slide: true }), fr("g", "备注", 2080, 0, 1920, 1080, { slide: true }),
+      fr("app", "Notes app redesign", 4160, 0, 1920, 1080), fr("n1", "notes: intro", 0, 1160, 1920, 400), fr("n2", "备注（第二页）", 2080, 1160, 1920, 400),
+    ]);
+    if (named !== "f,g,app") throw new Error(`名字规则 ${named}`);
+    return { rows, notes, named };
+  });
+
+  await step("演示：新建一页、添加备注", async () => {
+    const s = session(deck);
+    const api = s.api;
+    api.updateScene({ appState: { selectedElementIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
+    s.userInput();
+    newSlide(s);
+    await sleep(200);
+    const slides = slidesOf(api.getSceneElements());
+    const made = slides.find((x) => x.frame.name === "第 4 页" || x.frame.name === "Slide 4");
+    // 最后一行（第二行只有 C）最后一页的右边
+    if (!made || made.frame.x !== 1920 + 160 || made.frame.y !== 2000 || made.frame.width !== 1920 || !made.frame.customData?.excalidesk?.slide) throw new Error(`新页 ${JSON.stringify(made?.frame && [made.frame.name, made.frame.x, made.frame.y])}`);
+    // 新页是选中的：给它加备注
+    addNotes(s);
+    await sleep(200);
+    const again = slidesOf(api.getSceneElements()).find((x) => x.frame.id === made.frame.id)!;
+    if (again.notes.length !== 1 || again.notes[0].y !== 2000 + 1080 + 80) throw new Error(`备注 ${again.notes.length}`);
+    return { order: slidesOf(api.getSceneElements()).map((x) => x.frame.name), notes: again.notesText };
+  });
+
+  await step("导出 PDF：一页一张、按放映顺序、写盘", async () => {
+    const api = session(deck).api;
+    const { bytes, pages } = await renderPdf(api, "演示");
+    const text = new TextDecoder("latin1").decode(bytes);
+    const xrefAt = Number(text.match(/startxref\n(\d+)/)?.[1]);
+    const lines = text.slice(xrefAt).split("\n");
+    const size = Number(lines[1].split(" ")[1]);
+    const bad: number[] = [];
+    for (let id = 1; id < size; id++) if (!text.startsWith(`${id} 0 obj`, Number(lines[2 + id].slice(0, 10)))) bad.push(id);
+    const boxes = [...text.matchAll(/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]/g)].map((m) => `${m[1]}x${m[2]}`);
+    if (pages !== 4 || bad.length || !text.startsWith("%PDF-1.4") || boxes.some((b) => b !== "1920x1080")) throw new Error(JSON.stringify({ pages, bad, boxes }));
+    const target = `${dir}/演示.pdf`;
+    await activate(deck);
+    await exportPdf(target);
+    const written = await ipc.debugSize(target);
+    if (written < 1000) throw new Error(`写盘只有 ${written} 字节`);
+    return { pages, bytes: bytes.length };
   });
 
   await step("保存出的文件是合法的 .excalidraw", async () => {

@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Excalidesk — Excalidraw, at home on your Mac</title>
-    <meta name="description" content="A fast, local-first Excalidraw desktop app for macOS. Plain .excalidraw files in folders you pick, iCloud Drive sync, 120Hz drawing, and Claude Code or Codex sketching with you over MCP. Free and open source." />
+    <meta name="description" content="A fast, local-first Excalidraw desktop app for macOS. Plain .excalidraw files in folders you pick, iCloud Drive sync, 120Hz drawing, Claude Code or Codex sketching with you over MCP, and frames you can present as slides. Free and open source." />
     <meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#121214" media="(prefers-color-scheme: dark)" />
     <link rel="icon" href="icon.png" />
@@ -12,7 +12,7 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://excalidesk.linjiejim.com/" />
     <meta property="og:title" content="Excalidesk — Excalidraw, at home on your Mac" />
-    <meta property="og:description" content="Plain .excalidraw files, iCloud Drive sync, 120Hz drawing, and your coding agents sketching with you. Free and open source." />
+    <meta property="og:description" content="Plain .excalidraw files, iCloud Drive sync, 120Hz drawing, your coding agents sketching with you, and slides you present straight from the canvas. Free and open source." />
     <meta property="og:image" content="https://excalidesk.linjiejim.com/og.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="preload" href="fonts/excalifont-latin.woff2" as="font" type="font/woff2" crossorigin />
@@ -33,6 +33,7 @@
       <nav class="nav-links">
         <a href="#speed" data-i18n="nav.speed">Speed</a>
         <a href="#agents" data-i18n="nav.agents">Agents</a>
+        <a href="#present" data-i18n="nav.present">Present</a>
         <a href="#files" data-i18n="nav.files">Files</a>
         <a href="https://github.com/linjiejim/excalidesk">GitHub</a>
       </nav>
@@ -58,7 +59,7 @@
           </a>
         </div>
         <p class="meta">
-          <span data-i18n="hero.meta">macOS 13+ · Apple silicon (Intel build below) · MIT</span> · <a class="version" href="https://github.com/linjiejim/excalidesk/releases/latest">v0.6.0</a>
+          <span data-i18n="hero.meta">macOS 13+ · Apple silicon (Intel build below) · MIT</span> · <a class="version" href="https://github.com/linjiejim/excalidesk/releases/latest">v0.7.0</a>
         </p>
 
         <!-- The app itself, with numbered notes pinned to its parts -->
@@ -144,6 +145,41 @@
         </div>
       </section>
 
+      <!-- Present -->
+      <section class="split" id="present">
+        <div class="split-copy">
+          <h2 class="section-title" data-i18n-html="present.title">Your canvas <span>is the deck.</span></h2>
+          <p class="section-lede" data-i18n="present.lede">Every frame is a slide. Draw them yourself or have an agent lay out a whole deck, then press ⌥⌘P to present full screen, frame by frame, left to right.</p>
+          <ul class="ticks">
+            <li data-i18n-html="present.t1"><strong>Present from the canvas.</strong> The slide fills the screen and its neighbors stay hidden. Arrow keys to move, K for a laser pointer.</li>
+            <li data-i18n-html="present.t2"><strong>Speaker notes under each slide.</strong> They live in a notes frame below the slide, never reach the audience, and come up with N while you rehearse.</li>
+            <li data-i18n-html="present.t3"><strong>One PDF, one page per slide.</strong> Export the deck in play order to send around. Comments and notes stay out.</li>
+            <li data-i18n-html="present.t4"><strong>Agents make decks too.</strong> Ask Claude Code for a talk and it adds 1920×1080 slides with notes, and hears about anything that sticks out of a slide.</li>
+          </ul>
+        </div>
+        <div class="deck card sketchy" aria-hidden="true">
+          <div class="deck-row">
+            <div class="deck-col">
+              <div class="slide on" data-name="Intro"><b data-i18n="deck.s1">Why decks?</b><i></i><i class="short"></i></div>
+              <div class="slide-notes" data-i18n="deck.notes">Say hello, then the plan.</div>
+            </div>
+            <div class="deck-col">
+              <div class="slide" data-name="Plan"><b data-i18n="deck.s2">The plan</b><span class="boxes"><u></u><u></u><u></u></span></div>
+            </div>
+            <div class="deck-col">
+              <div class="slide" data-name="Ship"><b data-i18n="deck.s3">Ship it</b><i></i><i class="short"></i></div>
+            </div>
+          </div>
+          <div class="deck-keys">
+            <span><kbd>⌥⌘P</kbd> <span data-i18n="deck.k1">present</span></span>
+            <span><kbd>←</kbd><kbd>→</kbd> <span data-i18n="deck.k2">move</span></span>
+            <span><kbd>K</kbd> <span data-i18n="deck.k3">laser</span></span>
+            <span><kbd>N</kbd> <span data-i18n="deck.k4">notes</span></span>
+            <b>PDF</b>
+          </div>
+        </div>
+      </section>
+
       <!-- Files -->
       <section class="split reverse" id="files">
         <div class="split-copy">
@@ -180,7 +216,7 @@
           <article class="card"><h3 data-i18n="m1.t">Tabs and a real menu bar</h3><p data-i18n="m1.d">Native menus and shortcuts, tabs, and double-click any .excalidraw in Finder to open it.</p></article>
           <article class="card"><h3 data-i18n="m2.t">A sidebar that keeps up</h3><p data-i18n="m2.d">Right-click menus, double-click to rename, drag workspaces into order, sort by modified, created or name.</p></article>
           <article class="card"><h3 data-i18n="m3.t">Light, dark or system</h3><p data-i18n="m3.d">The canvas and the window follow the same theme, in English or 中文.</p></article>
-          <article class="card"><h3 data-i18n="m4.t">PNG and SVG export</h3><p data-i18n="m4.d">Comments are left out of exports automatically. In excalidraw.com they show up as plain sticky notes.</p></article>
+          <article class="card"><h3 data-i18n="m4.t">PNG, SVG and PDF export</h3><p data-i18n="m4.d">PDF puts one slide on each page. Comments are left out of exports automatically, and in excalidraw.com they show up as plain sticky notes.</p></article>
           <article class="card"><h3 data-i18n="m5.t">Updates itself</h3><p data-i18n="m5.d">Checks GitHub Releases, verifies each update against a key built into the app, and installs it when you restart.</p></article>
           <article class="card"><h3 data-i18n="m6.t">Official Excalidraw inside</h3><p data-i18n="m6.d">The official package, not a fork, fully offline with its fonts bundled. Same editor, same files.</p></article>
         </div>
@@ -201,7 +237,7 @@
             <span data-i18n="dl.intel">Intel</span><small class="dl-size"></small>
           </a>
         </div>
-        <p class="meta"><a href="https://github.com/linjiejim/excalidesk/releases" data-i18n="dl.all">All releases and notes</a> · <span class="version-text">v0.6.0</span></p>
+        <p class="meta"><a href="https://github.com/linjiejim/excalidesk/releases" data-i18n="dl.all">All releases and notes</a> · <span class="version-text">v0.7.0</span></p>
         <div class="note">
           <p data-i18n-html="dl.gatekeeper"><strong>First launch:</strong> Excalidesk isn't notarized by Apple yet, so macOS blocks it the first time. Open <b>System Settings → Privacy &amp; Security</b> and click <b>Open Anyway</b>. From then on it updates itself.</p>
         </div>

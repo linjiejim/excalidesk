@@ -118,9 +118,13 @@ pub struct DrawArgs {
     pub elements: Vec<Value>,
     /// Put the elements in a frame with this name. An existing frame (name or id) gets them added inside, relative to its top-left; otherwise a new frame is placed to the right of the existing content.
     pub frame: Option<String>,
-    /// Origin in scene coordinates. Default: to the right of the existing content (or the frame's top-left).
+    /// Origin in scene coordinates. Default: to the right of the existing content (or the frame's top-left). Not with `slide`.
     pub at: Option<Point>,
     pub style: Option<Style>,
+    /// Draw on a presentation slide: `frame` names an existing slide, or a new 1920×1080 slide with that name (default "Slide n") is added after the last one. Element coordinates are then relative to the slide's top-left. Slides never grow; anything sticking out comes back in `overflow`. `elements` may be empty (just add the slide or set its notes).
+    pub slide: Option<bool>,
+    /// Speaker notes for this slide (needs `slide`). Creates the notes frame under the slide, or replaces its text.
+    pub notes: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema, Serialize)]
@@ -132,6 +136,8 @@ pub struct MermaidArgs {
     pub frame: Option<String>,
     pub at: Option<Point>,
     pub style: Option<Style>,
+    /// Put the diagram on a presentation slide (see `draw`): centered, below what's already on it. The slide doesn't grow; check `overflow`.
+    pub slide: Option<bool>,
 }
 
 #[derive(Deserialize, JsonSchema, Serialize)]
@@ -186,7 +192,9 @@ The user annotates by pinning comment notes to elements (they show up in get_fee
 
 Paths are absolute or relative to a workspace folder (list_drawings shows them). Several agents may work at once, each on its own drawing; drawings you touch open in background tabs and your changes are saved like the user's own, with an undo for them.
 
-Prefer draw_mermaid for flowcharts, sequence, class, ER and state diagrams. Use draw with style \"clean\" for UI wireframes, \"sketch\" for loose ideas. Keep text short; leave space between frames.";
+Prefer draw_mermaid for flowcharts, sequence, class, ER and state diagrams. Use draw with style \"clean\" for UI wireframes, \"sketch\" for loose ideas. Keep text short; leave space between frames.
+
+Presentations: every frame is a slide, played left to right, row by row (the user presents with ⌥⌘P and exports a PDF). Make one draw call per slide with slide: true, a short frame name and style \"clean\"; coordinates are inside the 1920×1080 slide, so keep a ~100 px margin, body text at fontSize 32 or more and titles at 64 or more. Put speaker notes in `notes` (they go in a frame under the slide and are not shown to the audience). Fix anything listed in `overflow`, then render_drawing each slide by its frame name. read_drawing lists the slides in order, with their notes.";
 
 pub struct ToolDef {
     pub name: &'static str,

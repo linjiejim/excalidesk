@@ -1,6 +1,6 @@
 # Excalidesk
 
-一个快、离线优先的 [Excalidraw](https://github.com/excalidraw/excalidraw) macOS 桌面版，基于 Tauri 2。官网：<https://linjiejim.github.io/excalidesk/>
+一个快、离线优先的 [Excalidraw](https://github.com/excalidraw/excalidraw) macOS 桌面版，基于 Tauri 2。官网：<https://excalidesk.linjiejim.com/>
 
 - **文件就是标准 `.excalidraw`**：工作区就是普通文件夹，excalidraw.com、Obsidian 插件、git 都能直接用
 - **iCloud Drive 同步**：把工作区放进 iCloud Drive 即可；显示上传 / 下载状态，外部修改按元素自动合并

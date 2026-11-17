@@ -4,4 +4,4 @@
 
 | Spec | 内容 | 状态 |
 |---|---|---|
-| [20261117-presentation-mode.md](20261117-presentation-mode.md) | 演示模式：frame 当幻灯片放映、演讲者备注、导出 PDF、MCP 幻灯片参数 | confirmed |
+| [20261117-presentation-mode.md](20261117-presentation-mode.md) | 演示模式：frame 当幻灯片放映、演讲者备注、导出 PDF、MCP 幻灯片参数 | done（0.7.0） |

@@ -1,7 +1,7 @@
 # 演示模式：frame 当幻灯片放映、导出 PDF
 
 - 日期：2026-11-17
-- 状态：confirmed（Jim 2026-11-17：页面横排，其余按建议；V1 含导出 PDF；演讲者备注放在页下方的特殊 frame 里；写完直接开工）
+- 状态：done（0.7.0 发布，2026-11-18）。确认时：Jim 2026-11-17，页面横排，其余按建议；V1 含导出 PDF；演讲者备注放在页下方的特殊 frame 里；写完直接开工
 - 依赖：Agent 协作（MCP，[docs/mcp.md](../mcp.md)）、`@excalidraw/excalidraw` 0.18.1
 - 范围：前端放映、新建页 / 备注、导出 PDF；MCP 的 `draw` / `draw_mermaid` / `update_elements` / `read_drawing` 补幻灯片相关的参数和输出；原生菜单加「演示」
 - 不碰：`.excalidraw` 文件格式（只在 `customData.excalidesk` 里加字段）、保存链路、历史、iCloud、Windows / Linux
@@ -144,3 +144,12 @@ export function nextSlideBox(elements: readonly El[]): Box;    // 新页放哪
 
 - 真 App 里没有人眼看过放映的动画手感和激光笔（selftest 只验了状态；激光笔是在 Chromium 里看的）。翻页动画在 WebKit 上是否卡，要在真机上看一眼。
 - 原生菜单「演示」的快捷键（⌥⌘P、⇧⌥⌘P、⌥⌘N）没有在真 App 里按过，只验了菜单 id 走到的函数。
+
+**2026-11-18：合并并发布 0.7.0。**（这一级到了「已发布」：已安装的 App 会自动更新到它）
+
+- PR [#1](https://github.com/linjiejim/excalidesk/pull/1) squash 合并为 `2d3f81e`；发版提交 `37efcea`（`chore(release): 0.7.0`），tag `v0.7.0`。
+- 合并前审查：独立审查一轮 0 P0 / 2 P1 / 5 P2，全部修了（选择没恢复、固定页叫「Notes…」会被当成备注、视口被记成放映时的镜头、网格画在页上、放映中菜单还能开历史 / 导出、PDF 漏掉从页外画进来的箭头），外加启动即全屏时的全屏状态。由此补了 D16。
+- Release 工作流全绿（draft、aarch64、x86_64、updater）；`latest.json` 是 0.7.0，两个架构都有签名；GitHub 最新 release 是 v0.7.0。用 CI 打出来的 aarch64 DMG 里的 App 跑 `bench/mcp-e2e.py`：55 / 55。
+- 官网（Site 工作流，`2d3f81e`）已上线：演示一节、导航、导出卡片里的 PDF。
+
+审查修复之后**没有**在真 App 里重跑 `bench/selftest.sh`：那时 Mac 锁屏，被遮住的 WKWebView 不跑 `requestAnimationFrame`，放映那一步卡住。修复过的行为改在浏览器预览里验了（排序 / 配对用和 Rust 同一组用例、退出后选择 / 工具 / 视口恢复、放映时没有网格、页外画进来的箭头进了 PDF），selftest 里对应的检查也改好了，下次解锁时跑一次 `npm run selftest` 即可补上。真机上的翻页动画手感、激光笔、菜单快捷键仍然没有人眼看过。

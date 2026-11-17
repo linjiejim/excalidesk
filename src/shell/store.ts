@@ -53,6 +53,9 @@ export type CommentDraft = { path: string; left: number; top: number; targets: s
 /** 等用户处理的提示（装好的更新等重启）：不自动消失，普通 toast 也顶不掉它 */
 export type Prompt = { id: string; msg: string; action?: { label: string; run: () => void } };
 
+/** 正在放映：哪张图、第几页、要不要叠备注 */
+export type Presenting = { path: string; index: number; total: number; notes: boolean; notesText: string };
+
 export type ShellState = {
   roots: string[];
   trees: Record<string, TreeNode[]>;
@@ -76,6 +79,7 @@ export type ShellState = {
   settingsOpen: boolean;
   agents: AgentView[];
   commentDraft: CommentDraft | null;
+  presenting: Presenting | null;
 };
 
 let state: ShellState = {
@@ -88,6 +92,7 @@ let state: ShellState = {
   settingsOpen: false,
   agents: [],
   commentDraft: null,
+  presenting: null,
 };
 
 export function updateSettings(patch: Partial<Settings>) {
@@ -106,11 +111,12 @@ export function setState(patch: Partial<ShellState> | ((s: ShellState) => Partia
 export function updateTab(path: string, patch: Partial<Tab>) {
   setState((s) => ({ tabs: s.tabs.map((t) => (t.path === path ? { ...t, ...patch } : t)) }));
 }
+export function subscribe(l: () => void) {
+  listeners.add(l);
+  return () => void listeners.delete(l);
+}
 export function useShell<T>(selector: (s: ShellState) => T): T {
-  return useSyncExternalStore(
-    (l) => (listeners.add(l), () => listeners.delete(l)),
-    () => selector(state),
-  );
+  return useSyncExternalStore(subscribe, () => selector(state));
 }
 
 let toastTimer = 0;

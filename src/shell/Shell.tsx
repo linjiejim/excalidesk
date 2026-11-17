@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import "./shell.css";
 import { Editor } from "./Editor";
@@ -16,6 +16,9 @@ import { runSelftest } from "./selftest";
 import { commitComment, initAgents, nextComment, sendToAgent, startComment } from "./agent";
 import type { AgentView } from "./store";
 import { checkForUpdates, scheduleUpdateChecks } from "./updater";
+import { isPresenting, paintMask, togglePresentation } from "./present";
+import { addNotes, newSlide } from "./slides";
+import { exportPdf } from "./pdf";
 
 const SELFTEST = new URLSearchParams(location.search).get("selftest") === "1";
 
@@ -51,6 +54,16 @@ function onMenu(id: string) {
     case "prev_tab": return cycleTab(-1);
     case "settings": return setState({ settingsOpen: true });
     case "check_updates": return checkForUpdates(true);
+    case "present": return togglePresentation();
+    case "present_start": return togglePresentation(true);
+  }
+  // 放映中不改图、不导出
+  if (isPresenting()) return;
+  const s = active ? sessions.get(active) : null;
+  switch (id) {
+    case "new_slide": return newSlide(s);
+    case "add_notes": return addNotes(s);
+    case "export_pdf": return exportPdf();
   }
 }
 
@@ -101,7 +114,8 @@ export default function Shell() {
   const settings = useShell((s) => s.settings);
   const lang = useShell((s) => s.lang);
   const theme: "light" | "dark" = settings.theme === "system" ? (systemDark ? "dark" : "light") : settings.theme;
-  const sidebar = useShell((s) => s.sidebar && !s.focus);
+  const presenting = useShell((s) => !!s.presenting);
+  const sidebar = useShell((s) => s.sidebar && !s.focus && !s.presenting);
   const focus = useShell((s) => s.focus);
   const fullscreen = useShell((s) => s.fullscreen);
   const width = useShell((s) => s.sidebarWidth);
@@ -152,15 +166,16 @@ export default function Shell() {
   }, []);
 
   return (
-    <div className={`shell ${theme} ${inTauri ? "native" : ""} ${fullscreen ? "fullscreen" : ""} ${sidebar ? "" : "no-sidebar"}`}>
+    <div className={`shell ${theme} ${inTauri ? "native" : ""} ${fullscreen ? "fullscreen" : ""} ${sidebar ? "" : "no-sidebar"} ${presenting ? "presenting" : ""}`}>
       {sidebar && <Sidebar width={width} />}
       <main>
-        {focus ? <div className="focus-strip" data-tauri-drag-region /> : <TabBar />}
+        {presenting ? null : focus ? <div className="focus-strip" data-tauri-drag-region /> : <TabBar />}
         <div className="workspace">
-          <EditorArea theme={theme} lang={lang} />
+          {/* 放映时强制浅色：和导出的 PDF 一样，深色模式下 Excalidraw 是整体反色 */}
+          <EditorArea theme={presenting ? "light" : theme} lang={lang} />
           <HistoryPanel />
         </div>
-        {!focus && <StatusBar />}
+        {!focus && !presenting && <StatusBar />}
       </main>
       <SettingsDialog />
       <PromptToast />
@@ -541,6 +556,7 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
           <Editor session={session} theme={theme} lang={lang} />
           <AgentBar tab={tab} />
           <CommentPopover path={tab.path} />
+          <PresentOverlay />
         </>
       ) : (
         <div className="placeholder">
@@ -559,6 +575,23 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
         </div>
       )}
     </div>
+  );
+}
+
+// ── 放映 ───────────────────────────────────────────────
+
+/** 遮罩（框外涂黑，位置由 present.ts 直接写）、页码、备注 */
+function PresentOverlay() {
+  const t = useT();
+  const p = useShell((s) => s.presenting);
+  useLayoutEffect(() => paintMask());
+  if (!p) return null;
+  return (
+    <>
+      <div className="present-mask" />
+      <div className="present-hud" key={p.index}>{p.index + 1} / {p.total}</div>
+      {p.notes && <div className="present-notes selectable">{p.notesText || <span className="muted">{t("present.noNotes")}</span>}</div>}
+    </>
   );
 }
 

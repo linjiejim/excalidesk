@@ -67,6 +67,11 @@ const zh = {
   "settings.agentsConnect": "在终端里运行一次，把 Excalidesk 加到 Agent：", "settings.copy": "拷贝", "settings.copied": "已拷贝",
   "settings.agentsChannels": "Agent 没在等待时，点「发回」只会记下来；用 claude --dangerously-load-development-channels server:excalidesk 启动的 Claude Code 会话还会收到提醒。",
   "settings.agentsConnected": "已连接：{names}", "settings.agentsNone": "现在没有 Agent 连着。",
+  // 演示
+  "slides.name": "第 {n} 页", "slides.notesName": "备注", "slides.notesPlaceholder": "演讲者备注", "slides.pickFirst": "先选中一页（或把它挪到画面中间）",
+  "present.none": "没有可演示的页面。用「演示 → 新建一页」，或按 F 画一个 frame。", "present.noNotes": "这一页没有备注",
+  "present.menu": "演示", "present.fromStart": "从第一页开始演示", "present.newSlide": "新建一页", "present.addNotes": "添加演讲者备注", "present.exportPdf": "导出 PDF…",
+  "pdf.progress": "正在导出 PDF（{i}/{n}）…", "pdf.empty": "图是空的，没有可导出的内容", "pdf.failed": "导出 PDF 失败：{error}",
   // Rust 错误
   "err.no_icloud": "这台 Mac 没有开启 iCloud Drive", "err.name_invalid": "名字不能为空，也不能包含 / 或 :，不能以 . 开头", "err.exists": "「{0}」已经存在",
   "err.no_parent": "没有上级目录", "err.invalid_file": "不是有效的 .excalidraw 文件：{0}", "err.not_open": "文档没有打开", "err.trash_failed": "移到废纸篓失败", "err.reorder": "工作区列表已变化，请重试",
@@ -124,6 +129,10 @@ const en: typeof zh = {
   "settings.agentsConnect": "Run once in Terminal to add Excalidesk to an agent:", "settings.copy": "Copy", "settings.copied": "Copied",
   "settings.agentsChannels": "When the agent isn't waiting, Send only notes it down; Claude Code sessions started with claude --dangerously-load-development-channels server:excalidesk also get a reminder.",
   "settings.agentsConnected": "Connected: {names}", "settings.agentsNone": "No agents connected right now.",
+  "slides.name": "Slide {n}", "slides.notesName": "Notes", "slides.notesPlaceholder": "Speaker notes", "slides.pickFirst": "Select a slide first (or bring it to the middle of the screen)",
+  "present.none": "Nothing to present. Use Present → New Slide, or press F to draw a frame.", "present.noNotes": "No notes for this slide",
+  "present.menu": "Present", "present.fromStart": "Present from First Slide", "present.newSlide": "New Slide", "present.addNotes": "Add Speaker Notes", "present.exportPdf": "Export PDF…",
+  "pdf.progress": "Exporting PDF ({i}/{n})…", "pdf.empty": "The drawing is empty; nothing to export", "pdf.failed": "Couldn't export PDF: {error}",
   "err.no_icloud": "iCloud Drive isn't turned on on this Mac", "err.name_invalid": "Names can't be empty, contain / or :, or start with a dot", "err.exists": "“{0}” already exists",
   "err.no_parent": "No parent folder", "err.invalid_file": "Not a valid .excalidraw file: {0}", "err.not_open": "Document isn't open", "err.trash_failed": "Couldn't move to Trash", "err.reorder": "Workspaces changed — try again",
 };

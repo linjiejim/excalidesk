@@ -181,3 +181,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .copy-label { flex: none; width: 82px; color: var(--muted); font-size: 12px; }
 .copy-line code { flex: 1; font: 11.5px ui-monospace, SFMono-Regular, monospace; padding: 5px 8px; border-radius: 6px; background: var(--hover); }
 .shell .copy-line button { flex: none; padding: 3px 10px; font-size: 12px; }
+
+/* 放映（present.ts）：外壳和 Excalidraw 的界面都藏起来，框外涂黑 */
+.shell.presenting .workspace { border-top: none; background: #000; }
+.shell.presenting .banner, .shell.presenting .agent-bar, .shell.presenting .comment-pop { display: none !important; }
+.shell.presenting .excalidraw .layer-ui__wrapper { display: none !important; }
+html:not([data-laser]) .shell.presenting .excalidraw canvas.interactive { cursor: default !important; }
+.present-mask { position: fixed; z-index: 20; pointer-events: none; box-shadow: 0 0 0 200vmax #000; }
+.present-hud { position: fixed; z-index: 21; right: 20px; bottom: 16px; padding: 4px 10px; border-radius: 8px; background: rgba(0, 0, 0, .55); color: #fff; font-size: 13px; font-variant-numeric: tabular-nums; pointer-events: none; animation: present-hud 1.8s ease forwards; }
+@keyframes present-hud { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+.present-notes { position: fixed; z-index: 21; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(960px, calc(100vw - 48px)); max-height: 35vh; overflow: auto; padding: 16px 20px; border-radius: 12px; background: rgba(24, 24, 27, .9); color: #f1f3f5; font-size: 18px; line-height: 1.55; white-space: pre-wrap; box-shadow: 0 8px 32px rgba(0, 0, 0, .4); }
+.present-notes .muted { color: #adb5bd; }

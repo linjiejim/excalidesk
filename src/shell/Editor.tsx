@@ -7,6 +7,9 @@ import type { DocSession } from "./session";
 import { exportActive, toggleHistory } from "./actions";
 import { startComment } from "./agent";
 import { t } from "./i18n";
+import { exportPdf } from "./pdf";
+import { togglePresentation } from "./present";
+import { addNotes, newSlide } from "./slides";
 
 const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: null },
@@ -46,7 +49,12 @@ function EditorImpl({ session, theme, lang }: { session: DocSession; theme: "lig
         <MainMenu>
           <MainMenu.Item onSelect={() => exportActive("png")} shortcut="⇧⌘E">{lang === "zh" ? "导出 PNG…" : "Export PNG…"}</MainMenu.Item>
           <MainMenu.Item onSelect={() => exportActive("svg")}>{lang === "zh" ? "导出 SVG…" : "Export SVG…"}</MainMenu.Item>
+          <MainMenu.Item onSelect={() => exportPdf()}>{t("present.exportPdf")}</MainMenu.Item>
           <MainMenu.Item onSelect={() => toggleHistory(true)} shortcut="⌥⌘Y">{t("menu.history")}</MainMenu.Item>
+          <MainMenu.Separator />
+          <MainMenu.Item onSelect={() => togglePresentation()} shortcut="⌥⌘P">{t("present.menu")}</MainMenu.Item>
+          <MainMenu.Item onSelect={() => newSlide(session)} shortcut="⌥⌘N">{t("present.newSlide")}</MainMenu.Item>
+          <MainMenu.Item onSelect={() => addNotes(session)}>{t("present.addNotes")}</MainMenu.Item>
           <MainMenu.Separator />
           <MainMenu.DefaultItems.ClearCanvas />
           <MainMenu.DefaultItems.ChangeCanvasBackground />

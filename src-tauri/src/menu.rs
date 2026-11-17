@@ -35,6 +35,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, lang: &str) -> tauri::Result<Menu<R
         &item("save", l("保存", "Save"), Some("CmdOrCtrl+S"))?,
         &item("export_png", l("导出 PNG…", "Export PNG…"), Some("CmdOrCtrl+Shift+E"))?,
         &item("export_svg", l("导出 SVG…", "Export SVG…"), None)?,
+        &item("export_pdf", l("导出 PDF…", "Export PDF…"), None)?,
         &item("history", l("历史版本…", "Version History…"), Some("CmdOrCtrl+Alt+Y"))?,
         &sep()?,
         &item("reveal", l("在 Finder 中显示", "Show in Finder"), Some("CmdOrCtrl+Shift+R"))?,
@@ -55,9 +56,16 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, lang: &str) -> tauri::Result<Menu<R
         &sep()?,
         &PredefinedMenuItem::fullscreen(app, Some(l("进入全屏", "Enter Full Screen")))?,
     ])?;
+    let present = Submenu::with_items(app, l("演示", "Present"), true, &[
+        &item("present", l("从当前页开始演示", "Present from Current Slide"), Some("CmdOrCtrl+Alt+P"))?,
+        &item("present_start", l("从第一页开始演示", "Present from First Slide"), Some("CmdOrCtrl+Alt+Shift+P"))?,
+        &sep()?,
+        &item("new_slide", l("新建一页", "New Slide"), Some("CmdOrCtrl+Alt+N"))?,
+        &item("add_notes", l("添加演讲者备注", "Add Speaker Notes"), None)?,
+    ])?;
     let window = Submenu::with_items(app, l("窗口", "Window"), true, &[
         &PredefinedMenuItem::minimize(app, Some(l("最小化", "Minimize")))?,
         &PredefinedMenuItem::maximize(app, Some(l("缩放", "Zoom")))?,
     ])?;
-    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &window])
+    Menu::with_items(app, &[&app_menu, &file, &edit, &view, &present, &window])
 }

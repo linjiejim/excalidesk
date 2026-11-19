@@ -57,7 +57,7 @@ const zh = {
   // Agent（MCP）
   "agent.drew": "画了 {n} 个元素", "agent.changed": "改了 {n} 处", "agent.deleted": "删了 {n} 个元素", "agent.resolved": "处理了 {n} 条批注",
   "agent.undo": "撤销", "agent.undone": "已撤销 {agent} 的修改", "agent.read": "{agent} 读取了你的批注和改动",
-  "agent.comments": "{n} 条批注", "agent.comment": "批注", "agent.commentHint": "给选中的元素加批注（C）", "agent.nextComment": "跳到下一条批注",
+  "agent.comments": "{n} 条批注", "agent.comment": "批注", "agent.commentHint": "给选中的元素加批注（C）。没选中就放在画面中间", "agent.nextComment": "跳到下一条批注",
   "agent.send": "发回给 Agent", "agent.sendTo": "发回给 {name}", "agent.sendHint": "把批注和改动发给 Agent。只有点这里才会发送。",
   "agent.working": "正在画", "agent.reading": "正在看", "agent.waiting": "等你发回", "agent.idle": "已连接",
   "agent.sentWoke": "已发给 {names}", "agent.sentPushed": "{names} 没在等待，已推送提醒到它的会话（开了 channels 的 Claude Code 才收得到）。也可以在 Agent 那边说一句「看下批注」。",
@@ -120,7 +120,7 @@ const en: typeof zh = {
   // Agent (MCP)
   "agent.drew": "drew {n} elements", "agent.changed": "changed {n} elements", "agent.deleted": "deleted {n} elements", "agent.resolved": "resolved {n} comments",
   "agent.undo": "Undo", "agent.undone": "Undid {agent}'s change", "agent.read": "{agent} read your comments and edits",
-  "agent.comments": "Comments: {n}", "agent.comment": "Comment", "agent.commentHint": "Comment on the selection (C)", "agent.nextComment": "Go to the next comment",
+  "agent.comments": "Comments: {n}", "agent.comment": "Comment", "agent.commentHint": "Comment on the selection (C). With nothing selected, it goes in the middle.", "agent.nextComment": "Go to the next comment",
   "agent.send": "Send to Agent", "agent.sendTo": "Send to {name}", "agent.sendHint": "Sends your comments and edits to the agent. Nothing is sent until you click here.",
   "agent.working": "drawing", "agent.reading": "looking", "agent.waiting": "waiting for you", "agent.idle": "connected",
   "agent.sentWoke": "Sent to {names}", "agent.sentPushed": "{names} isn't waiting. A reminder went to its session (only Claude Code sessions with channels on receive it). You can also tell it to check your comments.",

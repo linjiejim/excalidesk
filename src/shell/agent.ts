@@ -676,19 +676,41 @@ async function playUser(agents: AgentView[]) {
 
 // ── 用户这一侧：批注、发回 ─────────────────────────────
 
-/** 按 C：给选中的元素（没选就是画布中间）开一个批注输入框 */
-export function startComment(s: DocSession) {
-  const api = s.api;
-  if (!api) return;
+/** 当前选中、且值得批注的元素（跳过批注便签自己）。没选中时 targets 为空。 */
+function commentSelection(api: any): { st: any; targets: string[]; box: Box | null } {
   const st = api.getAppState();
   const els = api.getSceneElements() as El[];
   const byId = new Map(els.map((e) => [e.id, e]));
   const picked = Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
   const targets = [...new Set(picked.map((id) => byId.get(id)?.containerId ?? id))].filter((id) => {
     const e = byId.get(id);
-    return e && !isCommentLike(e);
+    return e && !e.isDeleted && !isCommentLike(e);
   });
-  const box = unionBox(targets.map((id) => byId.get(id)!));
+  return { st, targets, box: unionBox(targets.map((id) => byId.get(id)!)) };
+}
+
+/** 选区右上角，相对 `.editor`。正在画、写字、框选或右键时不显示。 */
+export function commentChipAnchor(s: DocSession): { right: number; top: number; height: number } | null {
+  const api = s.api;
+  if (!api) return null;
+  const { st, box } = commentSelection(api);
+  if (!box) return null;
+  if (st.viewModeEnabled || st.editingTextElement || st.newElement || st.contextMenu || st.selectionElement) return null;
+  const host = document.querySelector(".editor")?.getBoundingClientRect();
+  if (!host || host.width < 40) return null;
+  const zoom = st.zoom?.value || 1;
+  return {
+    right: Math.round((box.x + box.w + st.scrollX) * zoom + (st.offsetLeft ?? 0) - host.left),
+    top: Math.round((box.y + st.scrollY) * zoom + (st.offsetTop ?? 0) - host.top),
+    height: Math.round(box.h * zoom),
+  };
+}
+
+/** 按 C：给选中的元素（没选就是画布中间）开一个批注输入框 */
+export function startComment(s: DocSession) {
+  const api = s.api;
+  if (!api) return;
+  const { st, targets, box } = commentSelection(api);
   const zoom = st.zoom.value;
   const scene = box
     ? { x: box.x + box.w + 56, y: box.y }

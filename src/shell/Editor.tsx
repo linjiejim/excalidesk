@@ -35,7 +35,7 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
   );
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
-    <div className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
+    <div className="excalidraw-host" tabIndex={-1} onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}

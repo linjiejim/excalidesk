@@ -97,6 +97,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .workspace { position: relative; z-index: 1; flex: 1; min-height: 0; display: flex; border-top: 1px solid var(--line); background: var(--canvas); }
 .editor { position: relative; flex: 1; min-width: 0; }
 .excalidraw-host { position: absolute; inset: 0; }
+.excalidraw-host:focus { outline: none; }
 .banner { position: absolute; z-index: 5; top: 64px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 14px; border-radius: 10px; background: var(--banner); color: var(--banner-fg); font-size: 12px; white-space: nowrap; box-shadow: 0 4px 16px rgba(0,0,0,.08); }
 .banner.warn { background: var(--warn); color: var(--warn-fg); padding-right: 6px; }
 .banner.warn button { border-color: currentColor; padding: 2px 10px; }
@@ -170,6 +171,10 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .shell .agent-bar button.link { height: 26px; padding: 0 6px; border-radius: 7px; color: var(--fg); }
 .shell .agent-bar button.link:hover { background: var(--hover); }
 .agent-bar kbd { margin-left: 2px; }
+.comment-affordance { position: absolute; z-index: 6; display: inline-flex; align-items: center; gap: 4px; height: 26px; padding: 0 7px 0 10px; border-radius: 8px; font-size: 12px; white-space: nowrap; box-shadow: 0 4px 18px rgba(0,0,0,.1), 0 0 0 .5px var(--line); }
+.shell button.comment-affordance { border: none; background: var(--panel); color: var(--fg); }
+.shell button.comment-affordance:hover { background: color-mix(in srgb, var(--fg) 6%, var(--panel)); }
+.comment-affordance kbd { margin-left: 2px; }
 .shell .agent-bar button.send { height: 26px; padding: 0 12px; border-radius: 8px; }
 .shell .agent-bar button.send.primary { background: var(--fg); color: var(--canvas); border-color: transparent; }
 .shell:has(.agent-bar) .toast { bottom: 140px; }
@@ -208,7 +213,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* 放映（present.ts）：外壳和 Excalidraw 的界面都藏起来，框外涂黑 */
 .shell.presenting .workspace { border-top: none; background: #000; }
-.shell.presenting .banner, .shell.presenting .agent-bar, .shell.presenting .comment-pop { display: none !important; }
+.shell.presenting .banner, .shell.presenting .agent-bar, .shell.presenting .comment-pop, .shell.presenting .comment-affordance { display: none !important; }
 .shell.presenting .excalidraw .layer-ui__wrapper { display: none !important; }
 html:not([data-laser]) .shell.presenting .excalidraw canvas.interactive { cursor: default !important; }
 .present-mask { position: fixed; z-index: 20; pointer-events: none; box-shadow: 0 0 0 200vmax #000; }

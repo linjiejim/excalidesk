@@ -13,7 +13,7 @@ import {
   syncWindowTitle, toggleHistory, trashPath, useICloudRoot,
 } from "./actions";
 import { runSelftest } from "./selftest";
-import { commentChipAnchor, commitComment, initAgents, nextComment, sendToAgent, startComment } from "./agent";
+import { commitComment, initAgents, nextComment, sendToAgent, startComment } from "./agent";
 import type { AgentView } from "./store";
 import { checkForUpdates, scheduleUpdateChecks } from "./updater";
 import { isPresenting, paintMask, togglePresentation } from "./present";
@@ -85,7 +85,6 @@ const Icon = {
   close: <Svg size={11}><path d="M4 4l8 8M12 4l-8 8" /></Svg>,
   sidebar: <Svg size={15}><rect x="2" y="3" width="12" height="10" rx="2" /><path d="M6 3v10" /></Svg>,
   history: <Svg><path d="M2.8 8a5.2 5.2 0 1 0 1.5-3.7" /><path d="M2.5 2.8v2.4h2.4" /><path d="M8 5.2V8l1.8 1.2" /></Svg>,
-  note: <Svg><path d="M3.5 2.8h6.2L12.6 5.7V13.2H3.5z" /><path d="M9.6 2.9V5.8h2.9" /></Svg>,
   sort: <Svg><path d="M4.5 3v10M2.5 11l2 2 2-2M9 4.5h4.5M9 8h3.2M9 11.5h2" /></Svg>,
   gear: <Svg size={15}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></Svg>,
   /** 四角星，和齿轮、加号一样是细线 */
@@ -658,11 +657,6 @@ function StatusBar() {
       {syncText && <span>{syncText}</span>}
       {tab.phase === "ready" && <span>{t("status.elements", { n: tab.elements })}</span>}
       <span className="grow" />
-      {tab.phase === "ready" && !tab.missing && (
-        <button className="link" title={t("agent.commentHint")} onClick={() => { const s = sessions.get(tab.path); if (s) startComment(s); }}>
-          {Icon.note}<span>{t("agent.comment")}</span>
-        </button>
-      )}
       <button className="link" onClick={() => toggleHistory()} title="⌥⌘Y">{Icon.history}<span>{t("status.history")}</span></button>
       <span className="ellipsis path" title={tab.path}>{prettyPath(dirname(tab.path))}</span>
     </div>
@@ -720,7 +714,6 @@ function EditorArea({ theme, lang }: { theme: "light" | "dark"; lang: "zh" | "en
       {tab.phase === "ready" && session ? (
         <>
           <Editor session={session} theme={theme} lang={lang} presenting={presenting} />
-          <CommentAffordance path={tab.path} />
           <AgentBar tab={tab} />
           <CommentPopover path={tab.path} />
           <PresentOverlay />
@@ -768,83 +761,6 @@ function agentStatus(a: AgentView) {
   if (a.status === "waiting") return t("agent.waiting");
   if (a.status === "working") return a.tool && /^(read|render|list|get_)/.test(a.tool) ? t("agent.reading") : t("agent.working");
   return t("agent.idle");
-}
-
-/** 选中元素后，贴在选区右上角的「批注 C」。输入框打开时让开。 */
-function CommentAffordance({ path }: { path: string }) {
-  const t = useT();
-  const drafting = useShell((s) => s.commentDraft?.path === path);
-  const ref = useRef<HTMLButtonElement>(null);
-  const [anchor, setAnchor] = useState<{ right: number; top: number; height: number } | null>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
-
-  useEffect(() => {
-    const s = sessions.get(path);
-    if (!s) return;
-    let frame = 0;
-    const refresh = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const next = commentChipAnchor(s);
-        setAnchor((prev) =>
-          prev && next && prev.right === next.right && prev.top === next.top && prev.height === next.height ? prev : next,
-        );
-      });
-    };
-    const stop = s.watchScene(refresh);
-    refresh();
-    return () => {
-      stop();
-      cancelAnimationFrame(frame);
-    };
-  }, [path]);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!anchor || !el) {
-      setPlace((prev) => (prev ? null : prev));
-      return;
-    }
-    const host = el.offsetParent as HTMLElement | null;
-    const w = el.offsetWidth;
-    const h = el.offsetHeight;
-    const hw = host?.clientWidth ?? 800;
-    const hh = host?.clientHeight ?? 600;
-    const gap = 8;
-    let left = anchor.right - w;
-    let top = anchor.top - h - gap;
-    if (top < 8) top = anchor.top + anchor.height + gap;
-    if (left < 8) left = 8;
-    if (left + w > hw - 8) left = Math.max(8, hw - 8 - w);
-    if (top + h > hh - 8) top = Math.max(8, hh - 8 - h);
-    const next = { left: Math.round(left), top: Math.round(top) };
-    setPlace((prev) => (prev && prev.left === next.left && prev.top === next.top ? prev : next));
-  }, [anchor, drafting]); // 输入框开关时按钮还在，再量一次，免得停在旧位置
-
-  // 输入框打开时不卸掉按钮：卸掉再装回来，位置要等下一帧量，Escape 之后会空一拍
-  if (!anchor) return null;
-  const shown = !drafting && !!place;
-  return (
-    <button
-      ref={ref}
-      type="button"
-      className="comment-affordance"
-      style={{ left: place?.left ?? 0, top: place?.top ?? 0, visibility: shown ? "visible" : "hidden", pointerEvents: shown ? "auto" : "none" }}
-      title={t("agent.commentHint")}
-      aria-hidden={shown ? undefined : true}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-      onClick={() => {
-        const s = sessions.get(path);
-        if (s) startComment(s);
-      }}
-    >
-      <span>{t("agent.comment")}</span>
-      <kbd>C</kbd>
-    </button>
-  );
 }
 
 /** 画布底部：哪些 Agent 在这张图上、未处理的批注、批注（C）和「发回给 Agent」。只在有 Agent 碰过这张图或有批注时出现 */
@@ -895,11 +811,7 @@ function CommentPopover({ path }: { path: string }) {
   const host = document.querySelector(".editor")?.getBoundingClientRect();
   const left = Math.min(Math.max(8, draft.left - (host?.left ?? 0)), (host?.width ?? 800) - 288);
   const top = Math.min(Math.max(8, draft.top - (host?.top ?? 0)), (host?.height ?? 600) - 150);
-  const cancel = () => {
-    setState({ commentDraft: null });
-    // 输入框卸掉后焦点会掉到页面上，C 就不再落到画布。把焦点还给画布。
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(".excalidraw-host")?.focus());
-  };
+  const cancel = () => setState({ commentDraft: null });
   return (
     <div className="comment-pop" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
       <textarea

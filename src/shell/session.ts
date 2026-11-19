@@ -60,8 +60,6 @@ export class DocSession {
   private candidates: Api[] = [];
   /** apply() 时画布已挂载但 api 还没确认：等第一次 onChange 确认后再推上去，否则旧场景会把它盖掉 */
   private needsPush = false;
-  /** 选区、滚动变了时通知。不标脏：批注芯片跟着选区走，不必每次指针移动都重渲染外壳 */
-  private sceneListeners = new Set<() => void>();
 
   debounceMs = 800;
   maxWaitMs = 5000;
@@ -145,24 +143,6 @@ export class DocSession {
     this.settleUntil = 0;
   };
 
-  /** 订阅选区和视口变化。返回取消函数。监听抛错不能挡住保存。 */
-  watchScene(fn: () => void) {
-    this.sceneListeners.add(fn);
-    return () => {
-      this.sceneListeners.delete(fn);
-    };
-  }
-
-  private notifyScene() {
-    for (const fn of this.sceneListeners) {
-      try {
-        fn();
-      } catch {
-        /* 一个监听坏了不能挡住保存 */
-      }
-    }
-  }
-
   liveCount() {
     let n = 0;
     for (const e of this.elements) if (!e.isDeleted) n++;
@@ -188,7 +168,6 @@ export class DocSession {
     this.elements = elements;
     this.appState = appState;
     this.files = files;
-    this.notifyScene();
     const v = getSceneVersion(elements as any);
     const ak = JSON.stringify(persisted(appState));
     let newFile = false;
@@ -212,7 +191,6 @@ export class DocSession {
   }
 
   onScroll = (scrollX: number, scrollY: number, zoom: { value: number }) => {
-    this.notifyScene();
     clearTimeout(this.viewportTimer);
     this.viewportTimer = window.setTimeout(() => this.saveViewport({ scrollX, scrollY, zoom: zoom.value }), 1000);
   };

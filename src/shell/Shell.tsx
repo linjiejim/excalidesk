@@ -87,6 +87,8 @@ const Icon = {
   history: <Svg><path d="M2.8 8a5.2 5.2 0 1 0 1.5-3.7" /><path d="M2.5 2.8v2.4h2.4" /><path d="M8 5.2V8l1.8 1.2" /></Svg>,
   sort: <Svg><path d="M4.5 3v10M2.5 11l2 2 2-2M9 4.5h4.5M9 8h3.2M9 11.5h2" /></Svg>,
   gear: <Svg size={15}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></Svg>,
+  /** 四角星，和齿轮、加号一样是细线 */
+  sparkle: <Svg size={15}><path d="M8 1.15 9.2 6.35 14.85 8 9.2 9.65 8 14.85 6.8 9.65 1.15 8 6.8 6.35Z" /></Svg>,
 };
 
 /** App 标志：随主题变色的矢量版（工具栏形状拼成的 E：矩形竖笔，矩形、菱形、椭圆三横）。
@@ -428,41 +430,199 @@ function TabBar() {
   const active = useShell((s) => s.active);
   const sidebar = useShell((s) => s.sidebar);
   return (
-    <div className="tabbar" data-tauri-drag-region onDoubleClick={(e) => e.target === e.currentTarget && newDoc()}>
-      {!sidebar && (
+    <div className="tabbar">
+      {/* 拖动区域只包标签，不包右侧弹出层，否则选命令文字会拖动窗口 */}
+      <div className="tabbar-scroll" data-tauri-drag-region onDoubleClick={(e) => e.target === e.currentTarget && newDoc()}>
+        {!sidebar && (
+          <>
+            <Logo text={false} />
+            <button className="icon show-sidebar" title={t("side.show")} onClick={() => setSidebar(true)}>{Icon.sidebar}</button>
+          </>
+        )}
+        {tabs.map((tab) => (
+          <div
+            key={tab.path}
+            className={`tab ${tab.path === active ? "on" : ""} ${tab.missing ? "missing" : ""}`}
+            onClick={() => activate(tab.path)}
+            onAuxClick={(e) => e.button === 1 && closeTab(tab.path)}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              popup([
+                { text: t("menu.close"), action: () => closeTab(tab.path) },
+                { text: t("menu.closeOthers"), action: () => closeOthers(tab.path), enabled: tabs.length > 1 },
+                "-",
+                { text: t("menu.history"), action: async () => { await activate(tab.path); toggleHistory(true); } },
+                { text: t("menu.reveal"), action: () => ipc.reveal(tab.path), enabled: !tab.missing },
+                { text: t("menu.copyPath"), action: () => copyPath(tab.path) },
+              ]);
+            }}
+            title={prettyPath(tab.path)}
+          >
+            <span className="ellipsis">{tab.title}</span>
+            <span className="tab-end">
+              {tab.agentDot && <span className="agent-dot" title={t("agent.badge")} />}
+              {tab.save === "error" ? <span className="err-dot" /> : tab.save !== "saved" ? <span className="dot" /> : null}
+              <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }} title={t("tab.close")}>{Icon.close}</button>
+            </span>
+          </div>
+        ))}
+        <button className="icon new-tab" title={t("tab.new")} onClick={() => newDoc()}>{Icon.plus}</button>
+      </div>
+      <AgentConnect />
+    </div>
+  );
+}
+
+/** 路径在斜杠处折行，不在单词中间断开。<wbr> 不会进剪贴板。 */
+function SlashWrap({ text }: { text: string }) {
+  const parts = text.split("/");
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && <>/<wbr /></>}
+        </span>
+      ))}
+    </>
+  );
+}
+
+function mcpCommands(exePath: string): [string, string][] {
+  const exe = exePath.includes(" ") ? `"${exePath}"` : exePath;
+  return [
+    ["Claude Code", `claude mcp add excalidesk -s user -- ${exe} --mcp`],
+    ["Codex", `codex mcp add excalidesk -- ${exe} --mcp`],
+  ];
+}
+
+function agentNameList(names: string[]) {
+  return names.join(getState().lang === "zh" ? "、" : ", ");
+}
+
+/** 设置和标签栏弹出层共用：本机可执行文件路径、开关、拷贝 */
+function useMcpConnect() {
+  const [info, setInfo] = useState<{ exe: string; enabled: boolean } | null>(null);
+  const [copied, setCopied] = useState("");
+  const timer = useRef(0);
+  useEffect(() => {
+    let live = true;
+    ipc.mcpInfo().then((i) => { if (live) setInfo({ exe: i.exe, enabled: i.enabled }); }, () => {});
+    return () => { live = false; window.clearTimeout(timer.current); };
+  }, []);
+  const copy = async (k: string, text: string) => {
+    await ipc.copyText(text).catch(() => navigator.clipboard?.writeText(text));
+    setCopied(k);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setCopied(""), 1500);
+  };
+  const setEnabled = async (on: boolean) => {
+    if (!info) return;
+    try {
+      await ipc.mcpSetEnabled(on);
+      setInfo({ ...info, enabled: on });
+    } catch { /* 没写成就保持原状 */ }
+  };
+  return { info, cmds: info ? mcpCommands(info.exe) : [], copied, copy, setEnabled };
+}
+
+function openAgentSettings() {
+  setState({ settingsOpen: true });
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const el = document.getElementById("settings-agent");
+    const modal = el?.closest(".modal") as HTMLElement | null;
+    if (!el || !modal) return;
+    const modalBox = modal.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    if (box.top < modalBox.top || box.bottom > modalBox.bottom) {
+      modal.scrollTo({ top: Math.max(0, box.top - modalBox.top + modal.scrollTop - 8) });
+    }
+    el.focus();
+  }));
+}
+
+/** 标签栏最右侧。放在外壳上：欢迎页也在，不会盖住画布右上角的素材库。
+ *  放映和专注模式不渲染标签栏，按钮和弹出层一起消失。 */
+function AgentConnect() {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || getState().settingsOpen) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setOpen(false);
+    };
+    window.addEventListener("mousedown", down);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("mousedown", down);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+  return (
+    <div className={`agent-connect ${open ? "open" : ""}`} ref={root}>
+      <button
+        className="icon"
+        aria-label={t("agent.connect")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((v) => !v)}
+      >
+        {Icon.sparkle}
+      </button>
+      <span className="agent-connect-tip" aria-hidden="true">{t("agent.connect")}</span>
+      {open && <AgentConnectPopover onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+function AgentConnectPopover({ onClose }: { onClose: () => void }) {
+  const t = useT();
+  const agents = useShell((s) => s.agents);
+  const { info, cmds, copied, copy, setEnabled } = useMcpConnect();
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+  const names = agentNameList(agents.map((a) => a.name));
+  return (
+    <div className="agent-pop" ref={ref} role="dialog" tabIndex={-1} aria-label={t("agent.connect")}>
+      <div className="agent-pop-head">
+        <b>{t("agent.connect")}</b>
+        <button className="icon" onClick={onClose} title={t("app.close")}>{Icon.close}</button>
+      </div>
+      {!info && <div className="muted small">{t("side.loading")}</div>}
+      {info && !info.enabled && (
+        <label className="agent-pop-toggle">
+          <span>
+            {t("settings.agents")}
+            <span className="setting-desc">{t("settings.agentsDesc")}</span>
+          </span>
+          <input type="checkbox" checked={info.enabled} onChange={(e) => void setEnabled(e.target.checked)} />
+        </label>
+      )}
+      {info?.enabled && (
         <>
-          <Logo text={false} />
-          <button className="icon show-sidebar" title={t("side.show")} onClick={() => setSidebar(true)}>{Icon.sidebar}</button>
+          <p className="agent-pop-desc">{t("agent.connectDesc")}</p>
+          <div className="agent-pop-cmds">
+            {cmds.map(([k, cmd]) => (
+              <div key={k} className="agent-cmd">
+                <div className="agent-cmd-head">
+                  <span>{k}</span>
+                  <button onClick={() => void copy(k, cmd)}>{copied === k ? t("settings.copied") : t("settings.copy")}</button>
+                </div>
+                <code className="selectable"><SlashWrap text={cmd} /></code>
+              </div>
+            ))}
+          </div>
+          <div className="agent-pop-status muted">{agents.length ? t("settings.agentsConnected", { names }) : t("settings.agentsNone")}</div>
         </>
       )}
-      {tabs.map((tab) => (
-        <div
-          key={tab.path}
-          className={`tab ${tab.path === active ? "on" : ""} ${tab.missing ? "missing" : ""}`}
-          onClick={() => activate(tab.path)}
-          onAuxClick={(e) => e.button === 1 && closeTab(tab.path)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            popup([
-              { text: t("menu.close"), action: () => closeTab(tab.path) },
-              { text: t("menu.closeOthers"), action: () => closeOthers(tab.path), enabled: tabs.length > 1 },
-              "-",
-              { text: t("menu.history"), action: async () => { await activate(tab.path); toggleHistory(true); } },
-              { text: t("menu.reveal"), action: () => ipc.reveal(tab.path), enabled: !tab.missing },
-              { text: t("menu.copyPath"), action: () => copyPath(tab.path) },
-            ]);
-          }}
-          title={prettyPath(tab.path)}
-        >
-          <span className="ellipsis">{tab.title}</span>
-          <span className="tab-end">
-            {tab.agentDot && <span className="agent-dot" title={t("agent.badge")} />}
-            {tab.save === "error" ? <span className="err-dot" /> : tab.save !== "saved" ? <span className="dot" /> : null}
-            <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }} title={t("tab.close")}>{Icon.close}</button>
-          </span>
-        </div>
-      ))}
-      <button className="icon new-tab" title={t("tab.new")} onClick={() => newDoc()}>{Icon.plus}</button>
+      <button className="agent-pop-more" onClick={() => { onClose(); openAgentSettings(); }}>{t("agent.connectMore")}</button>
     </div>
   );
 }
@@ -853,43 +1013,20 @@ function UpdateSettings() {
   );
 }
 
-/** 设置 → Agent：开关、接入命令（一键拷贝）、现在连着谁 */
+/** 设置 → Agent：开关、接入命令（一键拷贝）、现在连着谁。长说明（channels）只留在这里。 */
 function AgentSettings() {
   const t = useT();
   const agents = useShell((s) => s.agents);
-  const [info, setInfo] = useState<{ exe: string; enabled: boolean } | null>(null);
-  const [copied, setCopied] = useState("");
-  useEffect(() => {
-    ipc.mcpInfo().then(setInfo, () => {});
-  }, []);
+  const { info, cmds, copied, copy, setEnabled } = useMcpConnect();
   if (!info) return null;
-  const exe = info.exe.includes(" ") ? `"${info.exe}"` : info.exe;
-  const cmds: [string, string][] = [
-    ["Claude Code", `claude mcp add excalidesk -s user -- ${exe} --mcp`],
-    ["Codex", `codex mcp add excalidesk -- ${exe} --mcp`],
-  ];
-  const copy = async (k: string, text: string) => {
-    await ipc.copyText(text).catch(() => navigator.clipboard?.writeText(text));
-    setCopied(k);
-    setTimeout(() => setCopied(""), 1500);
-  };
-  const sep = getState().lang === "zh" ? "、" : ", ";
   return (
-    <>
+    <div id="settings-agent" className="settings-agent" tabIndex={-1}>
       <label className="setting">
         <span>
           {t("settings.agents")}
           <span className="setting-desc">{t("settings.agentsDesc")}</span>
         </span>
-        <input
-          type="checkbox"
-          checked={info.enabled}
-          onChange={async (e) => {
-            const on = e.target.checked;
-            await ipc.mcpSetEnabled(on);
-            setInfo({ ...info, enabled: on });
-          }}
-        />
+        <input type="checkbox" checked={info.enabled} onChange={(e) => void setEnabled(e.target.checked)} />
       </label>
       {info.enabled && (
         <div className="setting-block">
@@ -898,14 +1035,14 @@ function AgentSettings() {
             <div key={k} className="copy-line">
               <span className="copy-label">{k}</span>
               <code className="ellipsis selectable" title={cmd}>{cmd}</code>
-              <button onClick={() => copy(k, cmd)}>{copied === k ? t("settings.copied") : t("settings.copy")}</button>
+              <button onClick={() => void copy(k, cmd)}>{copied === k ? t("settings.copied") : t("settings.copy")}</button>
             </div>
           ))}
-          <span className="setting-desc">{agents.length ? t("settings.agentsConnected", { names: agents.map((a) => a.name).join(sep) }) : t("settings.agentsNone")}</span>
+          <span className="setting-desc">{agents.length ? t("settings.agentsConnected", { names: agentNameList(agents.map((a) => a.name)) }) : t("settings.agentsNone")}</span>
           <span className="setting-desc">{t("settings.agentsChannels")}</span>
         </div>
       )}
-    </>
+    </div>
   );
 }
 

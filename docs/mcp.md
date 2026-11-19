@@ -6,7 +6,7 @@ Claude Code、Codex 等 Agent 通过 MCP 在 Excalidesk 里画原型、呈现方
 
 ## 接入
 
-设置（⌘,）→ Agent 里有可复制的命令，路径是本机 App 的实际位置：
+标签栏右侧的「接入 Agent」，或设置（⌘,）→ Agent，可以复制接入命令。路径是本机 App 的实际位置：
 
 ```bash
 claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp

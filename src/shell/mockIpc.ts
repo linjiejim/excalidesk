@@ -46,6 +46,8 @@ function tree(root: string): TreeNode[] {
 
 const decode = (b: Uint8Array) => new TextDecoder().decode(b);
 const ok = <T>(v: T) => Promise.resolve(v);
+/** 浏览器预览里记住开关，和设置、标签栏弹出层共用。?mcp=0 从关掉开始。 */
+let mcpEnabled = new URLSearchParams(location.search).get("mcp") !== "0";
 
 export const mockIpc = {
   state: () => ok(state),
@@ -91,10 +93,10 @@ export const mockIpc = {
   debugSize: () => ok(0),
   externalEdit: () => ok(undefined),
   benchResult: () => ok(""),
-  // 浏览器预览：假装有一个 Claude Code 在等反馈（?agents=0 关掉）
+  // 浏览器预览：假装有一个 Claude Code 在等反馈（?agents=0 关掉）。?mcp=0 从关掉接入开始。
   mcpReady: () => ok(new URLSearchParams(location.search).get("agents") === "0" ? [] : [{ id: 1, name: "Claude Code", status: "waiting" as const, tool: "wait_for_feedback", path: null, files: seed, since: Date.now(), last: Date.now() }]),
   mcpReply: () => ok(undefined),
   mcpSend: () => ok({ woke: ["Claude Code"], pushed: [] as string[] }),
-  mcpInfo: () => ok({ exe: "/Applications/Excalidesk.app/Contents/MacOS/excalidesk", socket: "", enabled: true }),
-  mcpSetEnabled: () => ok(undefined),
+  mcpInfo: () => ok({ exe: "/Applications/Excalidesk.app/Contents/MacOS/excalidesk", socket: "", enabled: mcpEnabled }),
+  mcpSetEnabled: (on: boolean) => { mcpEnabled = on; return ok(undefined); },
 };

@@ -22,7 +22,7 @@
 
 ## Agent 协作
 
-在 设置（⌘,）→ Agent 里复制接入命令，比如：
+在标签栏右侧的「接入 Agent」，或设置（⌘,）→ Agent 里复制接入命令，比如：
 
 ```bash
 claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp

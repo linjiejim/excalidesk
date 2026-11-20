@@ -7,7 +7,7 @@
 - **120Hz**：解除 WKWebView 默认的 60fps 限制，ProMotion 屏上平移、手绘和 Chrome 一样跟手
 - **增量保存**：编辑时只把变了的元素交给 Rust，大图保存不卡主线程
 - **本地历史版本**：自动留档，合并前先备份，一键恢复或另存为副本
-- **和 Agent 协作（MCP）**：Claude Code、Codex 在图上画原型和方案，你改图或按 C 钉批注，点「发回」让它接着改；多个 Agent 可同时改不同的图
+- **和 Agent 协作（MCP）**：Claude Code、Codex 在图上画原型和方案，你改图或在属性栏 Actions 里点批注（C），点「发回」让它接着改；多个 Agent 可同时改不同的图
 - **演示**：每个 frame 是一页，⌥⌘P 全屏放映（方向键翻页、K 激光笔、N 看备注），演讲者备注放在页下方的备注 frame 里；导出 PDF 一页一张。Agent 可以直接画一整套幻灯片
 - **边界情况都兜住**：iCloud 冲突版本自动合并；文件在外部被删除或移走时暂停保存，不会把它写回来
 - 中英双语、浅色 / 深色 / 跟随系统（设置 ⌘,）
@@ -28,7 +28,7 @@
 claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS/excalidesk --mcp
 ```
 
-之后让 Agent「在 Excalidesk 里画个方案」即可。它画完会等你：在图上直接改，或选中元素按 **C** 写批注，再点底部的「发回」。发回只由你手动点。Agent 只能碰工作区里的图，碰过的图在后台标签打开，不打断你手上的那张。详见 [docs/mcp.md](docs/mcp.md)。
+之后让 Agent「在 Excalidesk 里画个方案」即可。它画完会等你：在图上直接改，或选中元素后在属性栏 Actions 里点批注（也可按 C），再点底部的「发回」。发回只由你手动点。Agent 只能碰工作区里的图，碰过的图在后台标签打开，不打断你手上的那张。详见 [docs/mcp.md](docs/mcp.md)。
 
 ## 开发
 

@@ -15,6 +15,54 @@ const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: null },
 };
 
+/** 和复制、删除、链接同一排。Excalidraw 没给扩展口，选区面板出现时把按钮补进 Actions。 */
+const COMMENT_ICON = `<svg aria-hidden="true" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3.2 3.2h9.6v6.4H8.4L5.6 12.2V9.6H3.2z"/></svg>`;
+
+function CommentAction({ session, lang }: { session: DocSession; lang: "zh" | "en" }) {
+  useEffect(() => {
+    const host = document.querySelector(".excalidraw-host");
+    if (!host) return;
+    const legendText = lang === "zh" ? "操作" : "Actions";
+    let btn: HTMLButtonElement | null = null;
+    const findList = () => {
+      for (const legend of host.querySelectorAll("legend")) {
+        if (legend.textContent?.trim() === legendText) return legend.parentElement?.querySelector(".buttonList") ?? null;
+      }
+      return null;
+    };
+    const ensure = () => {
+      const list = findList();
+      if (!list) {
+        btn?.remove();
+        btn = null;
+        return;
+      }
+      if (btn?.parentElement === list) return;
+      btn?.remove();
+      btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "comment-action";
+      btn.title = t("agent.commentHint");
+      btn.setAttribute("aria-label", t("agent.comment"));
+      btn.innerHTML = COMMENT_ICON;
+      btn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        startComment(session);
+      });
+      list.appendChild(btn);
+    };
+    ensure();
+    const mo = new MutationObserver(ensure);
+    mo.observe(host, { childList: true, subtree: true });
+    return () => {
+      mo.disconnect();
+      btn?.remove();
+    };
+  }, [session, lang]);
+  return null;
+}
+
 function EditorImpl({ session, theme, lang, presenting = false }: { session: DocSession; theme: "light" | "dark"; lang: "zh" | "en"; presenting?: boolean }) {
   const initialData = useMemo(() => session.initialData(), [session]);
   const onApi = useCallback((api: unknown) => session.attach(api), [session]);
@@ -36,6 +84,7 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
     <div className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
+      <CommentAction session={session} lang={lang} />
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}

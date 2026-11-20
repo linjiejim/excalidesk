@@ -676,19 +676,24 @@ async function playUser(agents: AgentView[]) {
 
 // ── 用户这一侧：批注、发回 ─────────────────────────────
 
-/** 按 C：给选中的元素（没选就是画布中间）开一个批注输入框 */
-export function startComment(s: DocSession) {
-  const api = s.api;
-  if (!api) return;
+/** 当前选中、且值得批注的元素（跳过批注便签自己）。没选中时 targets 为空。 */
+function commentSelection(api: any): { st: any; targets: string[]; box: Box | null } {
   const st = api.getAppState();
   const els = api.getSceneElements() as El[];
   const byId = new Map(els.map((e) => [e.id, e]));
   const picked = Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
   const targets = [...new Set(picked.map((id) => byId.get(id)?.containerId ?? id))].filter((id) => {
     const e = byId.get(id);
-    return e && !isCommentLike(e);
+    return e && !e.isDeleted && !isCommentLike(e);
   });
-  const box = unionBox(targets.map((id) => byId.get(id)!));
+  return { st, targets, box: unionBox(targets.map((id) => byId.get(id)!)) };
+}
+
+/** 按 C：给选中的元素（没选就是画布中间）开一个批注输入框 */
+export function startComment(s: DocSession) {
+  const api = s.api;
+  if (!api) return;
+  const { st, targets, box } = commentSelection(api);
   const zoom = st.zoom.value;
   const scene = box
     ? { x: box.x + box.w + 56, y: box.y }

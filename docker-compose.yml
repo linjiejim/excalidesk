@@ -1,0 +1,20 @@
+services:
+  excalidesk-collab:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: excalidesk-collab:latest
+    restart: unless-stopped
+    ports:
+      - "${EXCALIDESK_PORT:-3456}:3456"
+    environment:
+      PORT: "3456"
+      DATA_DIR: "/data"
+      SHARE_TTL_DAYS: "${SHARE_TTL_DAYS:-30}"
+      MAX_BODY_MB: "${MAX_BODY_MB:-25}"
+      CORS_ORIGIN: "${CORS_ORIGIN:-*}"
+    volumes:
+      - excalidesk_data:/data
+
+volumes:
+  excalidesk_data:

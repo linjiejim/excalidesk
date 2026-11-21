@@ -43,3 +43,15 @@ design/logo/candidates/
 
 # 打包产物
 release/
+
+# 自部署协作服务端数据与构建产物
+server/data/
+server/dist/
+
+# Expo 移动端
+mobile/.expo/
+mobile/ios/
+mobile/android/
+mobile/dist/
+mobile/web-build/
+

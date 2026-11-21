@@ -161,13 +161,14 @@ export function buildViewerHtml(opts: { dark: boolean }): string {
     ctx.closePath();
   }
 
-  function fillShape(e) {
+  function fillShape(e, tracePath) {
     if (!e.backgroundColor || e.backgroundColor === "transparent") return;
     if (e.fillStyle === "hachure" || e.fillStyle === "cross-hatch") {
       ctx.save();
       ctx.clip();
       ctx.strokeStyle = e.backgroundColor;
       ctx.lineWidth = Math.max(1.2, (e.strokeWidth || 2) * 0.85);
+      ctx.setLineDash([]);
       const step = Math.max(7, (e.strokeWidth || 2) * 4);
       const diag = Math.hypot(e.width || 1, e.height || 1);
       ctx.beginPath();
@@ -183,6 +184,7 @@ export function buildViewerHtml(opts: { dark: boolean }): string {
       }
       ctx.stroke();
       ctx.restore();
+      if (tracePath) tracePath();
     } else {
       ctx.fillStyle = e.backgroundColor;
       ctx.fill();
@@ -273,36 +275,46 @@ export function buildViewerHtml(opts: { dark: boolean }): string {
     } else if (e.type === "rectangle") {
       ctx.translate(e.x, e.y);
       const r = e.roundness ? Math.min(20, Math.min(Math.abs(w), Math.abs(h)) * 0.18) : 0;
-      drawRoundedRect(0, 0, w, h, r);
-      fillShape(e);
+      const trace = () => drawRoundedRect(0, 0, w, h, r);
+      trace();
+      fillShape(e, trace);
       if (e.strokeColor !== "transparent") ctx.stroke();
     } else if (e.type === "ellipse") {
       ctx.translate(e.x, e.y);
-      ctx.beginPath();
-      ctx.ellipse(w / 2, h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
-      fillShape(e);
+      const trace = () => {
+        ctx.beginPath();
+        ctx.ellipse(w / 2, h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+      };
+      trace();
+      fillShape(e, trace);
       if (e.strokeColor !== "transparent") ctx.stroke();
     } else if (e.type === "diamond") {
       ctx.translate(e.x, e.y);
-      ctx.beginPath();
-      ctx.moveTo(w / 2, 0);
-      ctx.lineTo(w, h / 2);
-      ctx.lineTo(w / 2, h);
-      ctx.lineTo(0, h / 2);
-      ctx.closePath();
-      fillShape(e);
+      const trace = () => {
+        ctx.beginPath();
+        ctx.moveTo(w / 2, 0);
+        ctx.lineTo(w, h / 2);
+        ctx.lineTo(w / 2, h);
+        ctx.lineTo(0, h / 2);
+        ctx.closePath();
+      };
+      trace();
+      fillShape(e, trace);
       if (e.strokeColor !== "transparent") ctx.stroke();
     } else if ((e.type === "line" || e.type === "arrow") && Array.isArray(e.points) && e.points.length >= 2) {
       ctx.translate(e.x, e.y);
       const pts = e.points;
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) {
-        ctx.lineTo(pts[i][0], pts[i][1]);
-      }
+      const trace = () => {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) {
+          ctx.lineTo(pts[i][0], pts[i][1]);
+        }
+      };
+      trace();
       if (e.type === "line" && pts.length > 2) {
         const first = pts[0], last = pts[pts.length - 1];
-        if (Math.hypot(first[0] - last[0], first[1] - last[1]) < 4) fillShape(e);
+        if (Math.hypot(first[0] - last[0], first[1] - last[1]) < 4) fillShape(e, trace);
       }
       ctx.stroke();
       ctx.setLineDash([]);

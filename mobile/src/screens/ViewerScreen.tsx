@@ -250,7 +250,7 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
             </Pressable>
 
             <Pressable onPress={() => void shareDrawing()} style={styles.shareBtn} hitSlop={6}>
-              <Text style={{ fontSize: 13, fontWeight: "600", color: theme.accent }}>{t("viewer.share")}</Text>
+              <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>{t("viewer.share")}</Text>
             </Pressable>
           </View>
         </SafeAreaView>

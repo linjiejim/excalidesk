@@ -48,21 +48,14 @@ export const FileCard = React.memo(function FileCard({ item, starred, theme, lan
           <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
             {item.name}
           </Text>
-          {item.source === "sample" && (
-            <View style={[styles.badge, { backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.badgeText, { color: theme.accent }]}>{t("files.sampleTag")}</Text>
-            </View>
-          )}
           {item.isUbiquitous && !item.downloaded && (
-            <View style={[styles.badge, { backgroundColor: theme.accentSoft }]}>
-              <Text style={[styles.badgeText, { color: theme.accent }]}>☁ {t("files.cloudOnly")}</Text>
-            </View>
+            <Text style={[styles.cloudTag, { color: theme.muted }]}>☁</Text>
           )}
         </View>
 
         <Text style={[styles.meta, { color: theme.muted }]} numberOfLines={1}>
           {[
-            item.folderName,
+            item.source === "sample" ? t("files.sampleTag") : item.folderName,
             item.elementCount !== undefined ? t("files.elements", { n: item.elementCount }) : null,
             item.slideCount ? t("files.slides", { n: item.slideCount }) : null,
             formatDate(item.mtime, lang),
@@ -80,7 +73,7 @@ export const FileCard = React.memo(function FileCard({ item, starred, theme, lan
         hitSlop={10}
         style={styles.starBtn}
       >
-        <Text style={{ fontSize: 18, color: starred ? "#f59f00" : theme.muted }}>{starred ? "★" : "☆"}</Text>
+        <Text style={{ fontSize: 16, color: starred ? theme.text : theme.muted }}>{starred ? "★" : "☆"}</Text>
       </Pressable>
     </Pressable>
   );
@@ -90,16 +83,16 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 10,
-    borderRadius: 14,
+    padding: 9,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 10,
-    gap: 12,
+    marginBottom: 8,
+    gap: 11,
   },
   body: {
     flex: 1,
     minWidth: 0,
-    gap: 4,
+    gap: 3,
   },
   titleRow: {
     flexDirection: "row",
@@ -107,21 +100,15 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   name: {
-    fontSize: 15,
+    fontSize: 14.5,
     fontWeight: "600",
     flexShrink: 1,
   },
-  meta: {
+  cloudTag: {
     fontSize: 12,
   },
-  badge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: "600",
+  meta: {
+    fontSize: 12,
   },
   starBtn: {
     padding: 6,

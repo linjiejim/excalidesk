@@ -45,7 +45,7 @@ export function SlideBar({ slides, activeIndex, theme, lang, onSelectSlide }: Pr
             onPress={() => setNotesOpen(true)}
             hitSlop={6}
           >
-            <Text style={[styles.notesLabel, { color: current.notesText ? theme.accent : theme.muted }]}>
+            <Text style={[styles.notesLabel, { color: current.notesText ? theme.text : theme.muted }]}>
               {t("viewer.notes")}
             </Text>
           </Pressable>

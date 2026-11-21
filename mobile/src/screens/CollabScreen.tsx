@@ -32,7 +32,6 @@ export function CollabScreen({ recentLinks, theme, lang, onOpenCollabUrl }: Prop
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
       <Text style={[styles.title, { color: theme.text }]}>{t("collab.title")}</Text>
-      <Text style={[styles.desc, { color: theme.muted }]}>{t("collab.desc")}</Text>
 
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <TextInput
@@ -54,7 +53,7 @@ export function CollabScreen({ recentLinks, theme, lang, onOpenCollabUrl }: Prop
           onPress={submit}
           style={({ pressed }) => [styles.primaryBtn, { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 }]}
         >
-          <Text style={styles.primaryBtnText}>{t("collab.open")}</Text>
+          <Text style={[styles.primaryBtnText, { color: theme.accentText }]}>{t("collab.open")}</Text>
         </Pressable>
         <Text style={[styles.e2ee, { color: theme.muted }]}>{t("collab.e2ee")}</Text>
       </View>
@@ -76,18 +75,8 @@ export function CollabScreen({ recentLinks, theme, lang, onOpenCollabUrl }: Prop
               <Text style={[styles.linkTitle, { color: theme.text }]} numberOfLines={1}>
                 {item.title}
               </Text>
-              <View
-                style={[
-                  styles.badge,
-                  { backgroundColor: item.kind === "room" ? "rgba(47,158,68,0.14)" : theme.accentSoft },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.badgeText,
-                    { color: item.kind === "room" ? theme.live : theme.accent },
-                  ]}
-                >
+              <View style={[styles.badge, { backgroundColor: theme.accentSoft }]}>
+                <Text style={[styles.badgeText, { color: item.kind === "room" ? theme.live : theme.muted }]}>
                   {item.kind === "room" ? t("collab.roomBadge") : t("collab.shareBadge")}
                 </Text>
               </View>
@@ -108,65 +97,57 @@ export function CollabScreen({ recentLinks, theme, lang, onOpenCollabUrl }: Prop
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    paddingTop: 8,
-    paddingBottom: 6,
-  },
-  desc: {
-    fontSize: 13.5,
-    lineHeight: 19,
-    marginBottom: 14,
+    fontSize: 18,
+    fontWeight: "600",
+    letterSpacing: -0.3,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    gap: 10,
-    marginBottom: 20,
+    padding: 12,
+    gap: 8,
+    marginBottom: 18,
   },
   input: {
-    height: 44,
-    borderRadius: 10,
+    height: 38,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    fontSize: 14,
+    paddingHorizontal: 10,
+    fontSize: 13.5,
   },
   err: {
-    fontSize: 12.5,
+    fontSize: 12,
   },
   primaryBtn: {
-    height: 42,
-    borderRadius: 10,
+    height: 38,
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
   },
   primaryBtnText: {
-    color: "#ffffff",
-    fontSize: 15,
-    fontWeight: "600",
+    fontSize: 14,
+    fontWeight: "500",
   },
   e2ee: {
     fontSize: 11.5,
-    lineHeight: 16,
   },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: "600",
-    textTransform: "uppercase",
-    letterSpacing: 0.4,
     marginBottom: 8,
+    paddingHorizontal: 2,
   },
   linkRow: {
-    borderRadius: 12,
+    padding: 10,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 12,
     marginBottom: 8,
-    gap: 4,
+    gap: 3,
   },
   linkTop: {
     flexDirection: "row",
@@ -175,7 +156,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   linkTitle: {
-    fontSize: 14.5,
+    fontSize: 14,
     fontWeight: "600",
     flex: 1,
   },
@@ -185,14 +166,14 @@ const styles = StyleSheet.create({
   badge: {
     paddingHorizontal: 7,
     paddingVertical: 2,
-    borderRadius: 6,
+    borderRadius: 5,
   },
   badgeText: {
-    fontSize: 10.5,
-    fontWeight: "600",
+    fontSize: 11,
+    fontWeight: "500",
   },
   empty: {
-    fontSize: 13.5,
-    paddingTop: 12,
+    fontSize: 12.5,
+    paddingHorizontal: 2,
   },
 });

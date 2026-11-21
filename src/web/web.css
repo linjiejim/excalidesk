@@ -1,11 +1,13 @@
 .web-collab {
   --bg: #ffffff;
-  --bar: rgba(248, 248, 247, 0.94);
+  --bar: #f4f4f2;
+  --panel: #ffffff;
   --fg: #1d1d1f;
-  --muted: #6e6e73;
-  --line: rgba(0, 0, 0, 0.09);
+  --muted: #86868b;
+  --line: rgba(0, 0, 0, 0.08);
   --hover: rgba(0, 0, 0, 0.05);
-  --accent: #6965db;
+  --logo-tile: #ffffff;
+  --logo-fill: #cdcbf5;
   position: fixed;
   inset: 0;
   display: flex;
@@ -17,29 +19,29 @@
 
 .web-collab.dark {
   --bg: #121212;
-  --bar: rgba(28, 28, 30, 0.94);
-  --fg: #f0f0f2;
-  --muted: #9a9aa0;
-  --line: rgba(255, 255, 255, 0.1);
-  --hover: rgba(255, 255, 255, 0.08);
-  --accent: #a5a2ff;
+  --bar: #1e1e20;
+  --panel: #1c1c1e;
+  --fg: #ececec;
+  --muted: #8e8e93;
+  --line: rgba(255, 255, 255, 0.09);
+  --hover: rgba(255, 255, 255, 0.06);
+  --logo-tile: #2c2c30;
+  --logo-fill: #55529a;
 }
 
 .web-bar {
   position: relative;
   z-index: 20;
   flex: none;
-  height: 48px;
-  padding: 0 12px;
+  height: 40px;
+  padding: 0 10px 0 12px;
   padding-top: env(safe-area-inset-top, 0px);
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
   background: var(--bar);
   border-bottom: 1px solid var(--line);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 }
 
 .web-brand {
@@ -49,29 +51,14 @@
   min-width: 0;
 }
 
-.web-logo {
-  width: 26px;
-  height: 26px;
-  border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 700;
-  font-size: 13px;
-  flex: none;
-}
-
-.web-title-wrap {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
+.web-logo { flex: none; }
+.web-logo-tile { fill: var(--logo-tile); stroke: var(--line); stroke-width: .8; }
+.web-logo-mark > * { fill: var(--logo-fill); stroke: var(--fg); stroke-width: 1.1; stroke-linejoin: round; }
 
 .web-title {
   font-size: 13px;
   font-weight: 600;
+  letter-spacing: -.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -81,8 +68,10 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
+  white-space: nowrap;
+  flex: none;
 }
 
 .web-status i {
@@ -95,65 +84,59 @@
 .web-status.connected i { background: #2f9e44; }
 .web-status.connecting i, .web-status.reconnecting i { background: #f08c00; }
 .web-status.error i { background: #d1453b; }
-.web-status.share i { background: var(--accent); }
 
 .web-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex: none;
 }
 
 .web-btn {
-  height: 30px;
+  height: 26px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: 6px;
   border: 1px solid var(--line);
   background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
+  cursor: default;
   white-space: nowrap;
 }
 
 .web-btn:hover { background: var(--hover); }
-.web-btn.primary { background: var(--fg); color: var(--bg); border-color: transparent; }
-.web-btn.active { border-color: var(--accent); color: var(--accent); }
+.web-btn.primary { background: var(--fg); color: var(--bg); border-color: transparent; font-weight: 500; }
+.web-btn.primary:hover { opacity: 0.9; background: var(--fg); }
 
-.web-peers {
-  display: inline-flex;
-  align-items: center;
-  cursor: pointer;
-  padding: 2px;
-}
-
-.web-avatar {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  border: 1.5px solid;
+.web-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
-  margin-left: -6px;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: default;
 }
-.web-avatar:first-child { margin-left: 0; }
+
+.web-icon:hover { color: var(--fg); background: var(--hover); }
 
 .web-name-pop {
   position: fixed;
-  top: 56px;
-  right: 12px;
+  top: 46px;
+  right: 10px;
   z-index: 30;
-  width: min(260px, calc(100vw - 24px));
-  padding: 12px;
+  width: min(240px, calc(100vw - 24px));
+  padding: 10px 12px;
   border-radius: 12px;
-  background: var(--bar);
-  border: 1px solid var(--line);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+  background: var(--panel);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.16), 0 0 0 .5px var(--line);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -162,14 +145,18 @@
 .web-name-pop input {
   width: 100%;
   box-sizing: border-box;
-  height: 32px;
-  padding: 0 10px;
-  border-radius: 8px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--bg);
   color: var(--fg);
   font: inherit;
+  font-size: 12px;
+  outline: none;
 }
+
+.web-name-pop input:focus { border-color: var(--fg); }
 
 .web-peer-list {
   display: flex;
@@ -185,8 +172,8 @@
 }
 
 .web-peer-row i {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
 }
 
@@ -223,14 +210,14 @@
   color: var(--muted);
 }
 
-.web-err { color: #d1453b; max-width: 380px; }
+.web-err { color: #d1453b; max-width: 340px; }
 
 .web-spinner {
-  width: 22px;
-  height: 22px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   border: 2px solid var(--line);
-  border-top-color: var(--accent);
+  border-top-color: var(--muted);
   animation: web-spin 0.8s linear infinite;
 }
 
@@ -245,31 +232,30 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 4px;
-  border-radius: 999px;
-  background: var(--bar);
-  border: 1px solid var(--line);
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14);
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--panel);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.1), 0 0 0 .5px var(--line);
 }
 
 .web-slides-bar button {
-  height: 28px;
-  min-width: 28px;
-  padding: 0 10px;
+  height: 26px;
+  min-width: 26px;
+  padding: 0 8px;
   border: none;
-  border-radius: 999px;
+  border-radius: 7px;
   background: transparent;
   color: var(--fg);
   font: inherit;
   font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
+  font-weight: 500;
+  cursor: default;
 }
 
 .web-slides-bar button:hover { background: var(--hover); }
 
 @media (max-width: 640px) {
-  .web-bar { height: 46px; padding: 0 8px; }
-  .web-btn { height: 28px; padding: 0 8px; font-size: 11.5px; }
+  .web-bar { height: 42px; padding: 0 8px; }
+  .web-btn { height: 26px; padding: 0 8px; font-size: 11.5px; }
   .web-title { max-width: 120px; }
 }

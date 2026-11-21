@@ -391,7 +391,7 @@ function RootApp() {
         )}
       </View>
 
-      <View style={[styles.tabBar, { backgroundColor: theme.surface, borderTopColor: theme.border }]}>
+      <View style={[styles.tabBar, { backgroundColor: theme.bar, borderTopColor: theme.border }]}>
         {(
           [
             ["files", "☁", t("tab.files")],
@@ -402,8 +402,8 @@ function RootApp() {
           const active = tab === key;
           return (
             <Pressable key={key} onPress={() => setTab(key)} style={styles.tabItem}>
-              <Text style={[styles.tabIcon, { color: active ? theme.accent : theme.muted }]}>{icon}</Text>
-              <Text style={[styles.tabLabel, { color: active ? theme.accent : theme.muted }]}>{label}</Text>
+              <Text style={[styles.tabIcon, { color: active ? theme.text : theme.muted }]}>{icon}</Text>
+              <Text style={[styles.tabLabel, { color: active ? theme.text : theme.muted }]}>{label}</Text>
             </Pressable>
           );
         })}

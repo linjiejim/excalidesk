@@ -29,7 +29,7 @@ function Segmented<T extends string>({
   onChange: (v: T) => void;
 }) {
   return (
-    <View style={[styles.segmented, { backgroundColor: theme.bg, borderColor: theme.border }]}>
+    <View style={[styles.segmented, { backgroundColor: theme.accentSoft }]}>
       {options.map(([v, label]) => {
         const active = v === value;
         return (
@@ -101,12 +101,9 @@ export function SettingsScreen({
         ) : (
           folders.map((f) => (
             <View key={f.id} style={[styles.folderRow, { borderTopColor: theme.border }]}>
-              <Text style={[styles.folderName, { color: theme.text }]}>
-                {f.isICloud ? "☁ " : "📁 "}
-                {f.name}
-              </Text>
+              <Text style={[styles.folderName, { color: theme.text }]}>{f.name}</Text>
               <Pressable onPress={() => onRemoveFolder(f.id)}>
-                <Text style={{ color: theme.danger, fontSize: 13, fontWeight: "600" }}>{t("settings.remove")}</Text>
+                <Text style={{ color: theme.danger, fontSize: 12.5 }}>{t("settings.remove")}</Text>
               </Pressable>
             </View>
           ))
@@ -114,7 +111,7 @@ export function SettingsScreen({
 
         {isNativeICloudModuleAvailable && (
           <Pressable onPress={onAddFolder} style={[styles.outlineBtn, { borderColor: theme.border }]}>
-            <Text style={{ color: theme.accent, fontWeight: "600" }}>+ {t("settings.addFolder")}</Text>
+            <Text style={{ color: theme.text, fontWeight: "500", fontSize: 13 }}>+ {t("settings.addFolder")}</Text>
           </Pressable>
         )}
       </View>
@@ -130,7 +127,6 @@ export function SettingsScreen({
           autoCorrect={false}
           style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.bg }]}
         />
-        <Text style={[styles.hint, { color: theme.muted }]}>{t("settings.serverHint")}</Text>
       </View>
 
       <Pressable
@@ -140,7 +136,7 @@ export function SettingsScreen({
         }}
         style={[styles.dangerBtn, { backgroundColor: theme.surface, borderColor: theme.border }]}
       >
-        <Text style={{ color: theme.danger, fontWeight: "600", fontSize: 15 }}>{t("settings.clearCache")}</Text>
+        <Text style={{ color: theme.danger, fontWeight: "500", fontSize: 14 }}>{t("settings.clearCache")}</Text>
       </Pressable>
     </ScrollView>
   );
@@ -151,25 +147,25 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     paddingBottom: 32,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-    paddingTop: 8,
-    paddingBottom: 14,
+    fontSize: 18,
+    fontWeight: "600",
+    letterSpacing: -0.3,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
   card: {
-    borderRadius: 16,
+    borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    padding: 14,
-    gap: 10,
-    marginBottom: 14,
+    padding: 12,
+    gap: 8,
+    marginBottom: 12,
   },
   label: {
-    fontSize: 15,
+    fontSize: 13.5,
     fontWeight: "600",
   },
   hint: {
@@ -177,7 +173,7 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   muted: {
-    fontSize: 13,
+    fontSize: 12.5,
   },
   divider: {
     height: StyleSheet.hairlineWidth,
@@ -185,53 +181,50 @@ const styles = StyleSheet.create({
   },
   segmented: {
     flexDirection: "row",
-    padding: 3,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
+    padding: 2,
+    borderRadius: 8,
   },
   segBtn: {
     flex: 1,
-    height: 32,
-    borderRadius: 8,
+    height: 28,
+    borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
   },
   segText: {
-    fontSize: 13,
-    fontWeight: "600",
+    fontSize: 12.5,
+    fontWeight: "500",
   },
   folderRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 10,
+    paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   folderName: {
-    fontSize: 14,
-    fontWeight: "500",
+    fontSize: 13.5,
   },
   outlineBtn: {
-    height: 38,
-    borderRadius: 10,
+    height: 34,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 4,
+    marginTop: 2,
   },
   input: {
+    height: 36,
+    borderRadius: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 10,
+    fontSize: 13,
+  },
+  dangerBtn: {
     height: 40,
     borderRadius: 10,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 12,
-    fontSize: 14,
-  },
-  dangerBtn: {
-    height: 44,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
   },
 });

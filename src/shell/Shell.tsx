@@ -612,7 +612,6 @@ function ShareConnect() {
 function ShareConnectPopover({ active, onClose }: { active: string | null; onClose: () => void }) {
   const t = useT();
   const room = useShell((s) => (active ? s.collabRooms[active] : undefined));
-  const server = useShell((s) => s.settings.collabServer);
   const [joinInput, setJoinInput] = useState("");
   const [shareUrl, setShareUrl] = useState("");
   const [busy, setBusy] = useState<"start" | "join" | "share" | null>(null);
@@ -662,6 +661,8 @@ function ShareConnectPopover({ active, onClose }: { active: string | null; onClo
     try {
       const res = await createReadOnlyShare(session);
       setShareUrl(res.url);
+      setCopied("share");
+      window.setTimeout(() => setCopied(""), 1500);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -674,6 +675,7 @@ function ShareConnectPopover({ active, onClose }: { active: string | null; onClo
       ? t("collab.status.connected", { n: Math.max(1, room.peers.length) })
       : t(`collab.status.${room.status}` as Key)
     : "";
+  const peerNames = room ? agentNameList(room.peers.map((p) => p.username)) : "";
 
   return (
     <div className="agent-pop share-pop" ref={ref} role="dialog" tabIndex={-1} aria-label={t("collab.title")}>
@@ -686,88 +688,67 @@ function ShareConnectPopover({ active, onClose }: { active: string | null; onClo
         <div className="muted small">{t("collab.openDocFirst")}</div>
       ) : (
         <>
-          <div className="share-section">
-            <div className="share-sec-head">
-              <b>{t("collab.liveTitle")}</b>
-              {room && (
+          {!room ? (
+            <div className="share-actions-stack">
+              <button className="share-primary" disabled={busy !== null} onClick={() => void onStart()}>
+                {t("collab.start")}
+              </button>
+              <button disabled={busy !== null} onClick={() => void onCreateShare()}>
+                {busy === "share" ? t("collab.creatingShare") : copied === "share" ? t("settings.copied") : t("collab.createShare")}
+              </button>
+              {shareUrl && (
+                <div className="share-link-box">
+                  <code className="ellipsis selectable" title={shareUrl}>{shareUrl}</code>
+                  <button onClick={() => void copy("share", shareUrl)}>
+                    {copied === "share" ? t("settings.copied") : t("settings.copy")}
+                  </button>
+                </div>
+              )}
+              <div className="share-join-row share-divider">
+                <input
+                  className="share-input"
+                  value={joinInput}
+                  placeholder={t("collab.joinPlaceholder")}
+                  onChange={(e) => setJoinInput(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && void onJoin()}
+                />
+                <button disabled={busy !== null || !joinInput.trim()} onClick={() => void onJoin()}>
+                  {t("collab.join")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="share-actions-stack">
+              <div className="share-sec-head">
                 <span className={`collab-badge ${room.status}`}>
                   <i />
                   {statusLabel}
                 </span>
-              )}
-            </div>
-            {!room ? (
-              <>
-                <p className="agent-pop-desc">{t("collab.liveDesc")}</p>
-                <button className="share-primary" disabled={busy !== null} onClick={() => void onStart()}>
-                  {t("collab.start")}
-                </button>
-                <div className="share-join-row">
-                  <input
-                    className="share-input"
-                    value={joinInput}
-                    placeholder={t("collab.joinPlaceholder")}
-                    onChange={(e) => setJoinInput(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && void onJoin()}
-                  />
-                  <button disabled={busy !== null || !joinInput.trim()} onClick={() => void onJoin()}>
-                    {t("collab.join")}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="share-peers">
-                  {room.peers.map((p) => (
-                    <span key={p.clientId} className="share-peer-chip">
-                      <i style={{ background: p.color.stroke }} />
-                      {p.username}
-                    </span>
-                  ))}
-                </div>
-                <div className="share-link-box">
-                  <code className="ellipsis selectable" title={room.roomUrl}>{room.roomUrl}</code>
-                  <button onClick={() => void copy("room", room.roomUrl)}>
-                    {copied === "room" ? t("settings.copied") : t("settings.copy")}
-                  </button>
-                </div>
-                <div className="share-row-actions">
-                  <button onClick={() => void copy("ro", room.readOnlyUrl)}>
-                    {copied === "ro" ? t("settings.copied") : t("collab.copyReadOnly")}
-                  </button>
-                  <button className="danger" onClick={() => stopCollab(session.path)}>
-                    {t("collab.stop")}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="share-section">
-            <div className="share-sec-head">
-              <b>{t("collab.shareTitle")}</b>
-            </div>
-            <p className="agent-pop-desc">{t("collab.shareDesc")}</p>
-            <button disabled={busy !== null} onClick={() => void onCreateShare()}>
-              {busy === "share" ? t("collab.creatingShare") : t("collab.createShare")}
-            </button>
-            {shareUrl && (
+                <span className="muted small ellipsis">{peerNames}</span>
+              </div>
               <div className="share-link-box">
-                <code className="ellipsis selectable" title={shareUrl}>{shareUrl}</code>
-                <button onClick={() => void copy("share", shareUrl)}>
-                  {copied === "share" ? t("settings.copied") : t("settings.copy")}
+                <code className="ellipsis selectable" title={room.roomUrl}>{room.roomUrl}</code>
+                <button onClick={() => void copy("room", room.roomUrl)}>
+                  {copied === "room" ? t("settings.copied") : t("settings.copy")}
                 </button>
               </div>
-            )}
-          </div>
+              <div className="share-row-actions">
+                <button onClick={() => void copy("ro", room.readOnlyUrl)}>
+                  {copied === "ro" ? t("settings.copied") : t("collab.copyReadOnly")}
+                </button>
+                <button className="danger" onClick={() => stopCollab(session.path)}>
+                  {t("collab.stop")}
+                </button>
+              </div>
+            </div>
+          )}
 
           {err && <div className="err small">{err}</div>}
-          <div className="muted small">{t("collab.e2eeNote")}</div>
         </>
       )}
 
       <div className="share-foot">
-        <span className="muted small ellipsis" title={server}>{server}</span>
+        <span className="muted small">{t("collab.e2eeNote")}</span>
         <button className="agent-pop-more" onClick={() => { onClose(); openCollabSettings(); }}>
           {t("collab.settingsMore")}
         </button>

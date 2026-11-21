@@ -9,6 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Svg, { Ellipse, G, Path, Rect } from "react-native-svg";
 import type { EffectiveLang, I18nKey } from "../i18n";
 import { translate } from "../i18n";
 import type { ThemeColors } from "../theme";
@@ -34,6 +35,20 @@ interface Props {
 }
 
 type FilterTab = "all" | "starred" | "recent";
+
+function BrandMark({ theme }: { theme: ThemeColors }) {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24">
+      <Rect x={1.5} y={1.5} width={21} height={21} rx={6} fill={theme.logoTile} stroke={theme.border} strokeWidth={0.8} />
+      <G fill={theme.logoFill} stroke={theme.text} strokeWidth={1.1} strokeLinejoin="round">
+        <Rect x={6.35} y={5} width={3.1} height={13.7} />
+        <Rect x={9.45} y={5} width={8} height={3.2} />
+        <Path d="M9.25 11.7 L13.05 10.05 L16.95 11.7 L13.05 13.35 Z" />
+        <Ellipse cx={13.55} cy={16.95} rx={4.1} ry={1.8} />
+      </G>
+    </Svg>
+  );
+}
 
 export function FilesScreen({
   files,
@@ -82,19 +97,35 @@ export function FilesScreen({
   return (
     <View style={[styles.root, { backgroundColor: theme.bg }]}>
       <View style={styles.header}>
-        <Text style={[styles.title, { color: theme.text }]}>{t("files.title")}</Text>
-        <Pressable
-          onPress={() => onChangeSort(sort === "mtime" ? "name" : "mtime")}
-          style={[styles.sortPill, { backgroundColor: theme.surface, borderColor: theme.border }]}
-        >
-          <Text style={[styles.sortText, { color: theme.muted }]}>
-            {sort === "mtime" ? t("files.sortMtime") : t("files.sortName")}
-          </Text>
-        </Pressable>
+        <View style={styles.brand}>
+          <BrandMark theme={theme} />
+          <Text style={[styles.title, { color: theme.text }]}>{t("files.title")}</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <Pressable
+            onPress={() => onChangeSort(sort === "mtime" ? "name" : "mtime")}
+            style={[styles.ghostBtn, { borderColor: theme.border, backgroundColor: theme.surface }]}
+          >
+            <Text style={[styles.ghostText, { color: theme.muted }]}>
+              {sort === "mtime" ? t("files.sortMtime") : t("files.sortName")}
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={isNativeICloudModuleAvailable ? onConnectICloudFolder : onPickSingleFile}
+            style={({ pressed }) => [
+              styles.openBtn,
+              { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
+            ]}
+          >
+            <Text style={[styles.openBtnText, { color: theme.accentText }]}>
+              {isNativeICloudModuleAvailable ? `+ ${t("files.connectICloud")}` : t("files.pickFile")}
+            </Text>
+          </Pressable>
+        </View>
       </View>
 
       <View style={[styles.searchBox, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={{ color: theme.muted, fontSize: 15 }}>⌕</Text>
+        <Text style={{ color: theme.muted, fontSize: 14 }}>⌕</Text>
         <TextInput
           value={query}
           onChangeText={setQuery}
@@ -106,41 +137,7 @@ export function FilesScreen({
         />
       </View>
 
-      <View style={styles.actionRow}>
-        {isNativeICloudModuleAvailable && (
-          <Pressable
-            onPress={onConnectICloudFolder}
-            style={({ pressed }) => [
-              styles.actionBtn,
-              { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 },
-            ]}
-          >
-            <Text style={styles.actionBtnPrimaryText}>☁ {t("files.connectICloud")}</Text>
-          </Pressable>
-        )}
-        <Pressable
-          onPress={onPickSingleFile}
-          style={({ pressed }) => [
-            styles.actionBtn,
-            isNativeICloudModuleAvailable
-              ? { backgroundColor: theme.surface, borderWidth: StyleSheet.hairlineWidth, borderColor: theme.border }
-              : { backgroundColor: theme.accent },
-            { opacity: pressed ? 0.85 : 1 },
-          ]}
-        >
-          <Text style={isNativeICloudModuleAvailable ? [styles.actionBtnText, { color: theme.text }] : styles.actionBtnPrimaryText}>
-            {isNativeICloudModuleAvailable ? t("files.pickFile") : `☁ ${t("files.pickFile")}`}
-          </Text>
-        </Pressable>
-      </View>
-
-      {!isNativeICloudModuleAvailable && (
-        <View style={[styles.hintBanner, { backgroundColor: theme.accentSoft }]}>
-          <Text style={[styles.hintText, { color: theme.accent }]}>{t("files.expoGoHint")}</Text>
-        </View>
-      )}
-
-      <View style={styles.filterRow}>
+      <View style={[styles.segmented, { backgroundColor: theme.accentSoft }]}>
         {(["all", "starred", "recent"] as FilterTab[]).map((tab) => {
           const active = filter === tab;
           const label =
@@ -149,15 +146,9 @@ export function FilesScreen({
             <Pressable
               key={tab}
               onPress={() => setFilter(tab)}
-              style={[
-                styles.filterChip,
-                {
-                  backgroundColor: active ? theme.text : theme.surface,
-                  borderColor: active ? theme.text : theme.border,
-                },
-              ]}
+              style={[styles.segBtn, active && { backgroundColor: theme.surface }]}
             >
-              <Text style={[styles.filterText, { color: active ? theme.bg : theme.muted }]}>{label}</Text>
+              <Text style={[styles.segText, { color: active ? theme.text : theme.muted }]}>{label}</Text>
             </Pressable>
           );
         })}
@@ -167,7 +158,7 @@ export function FilesScreen({
         data={filtered}
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.accent} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.muted} />}
         renderItem={({ item }) => (
           <View>
             <FileCard
@@ -179,9 +170,9 @@ export function FilesScreen({
               onToggleStar={() => onToggleStar(item.id)}
             />
             {openingId === item.id && (
-              <View style={[styles.openingOverlay, { backgroundColor: theme.hudBg }]}>
-                <ActivityIndicator size="small" color={theme.accent} />
-                <Text style={[styles.openingText, { color: theme.text }]}>{t("files.downloading")}</Text>
+              <View style={styles.downloadingOverlay}>
+                <ActivityIndicator size="small" color={theme.text} />
+                <Text style={[styles.downloadingText, { color: theme.muted }]}>{t("files.downloading")}</Text>
               </View>
             )}
           </View>
@@ -200,121 +191,110 @@ export function FilesScreen({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 8,
+    paddingTop: 10,
     paddingBottom: 10,
+    gap: 8,
+  },
+  brand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   title: {
-    fontSize: 28,
-    fontWeight: "700",
-    letterSpacing: -0.5,
-  },
-  sortPill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  sortText: {
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: "600",
+    letterSpacing: -0.3,
+  },
+  headerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  ghostBtn: {
+    height: 28,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+    borderWidth: StyleSheet.hairlineWidth,
+    justifyContent: "center",
+  },
+  ghostText: {
+    fontSize: 12,
+    fontWeight: "500",
+  },
+  openBtn: {
+    height: 28,
+    paddingHorizontal: 11,
+    borderRadius: 7,
+    justifyContent: "center",
+  },
+  openBtnText: {
+    fontSize: 12,
+    fontWeight: "500",
   },
   searchBox: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
-    height: 40,
-    borderRadius: 12,
+    height: 36,
+    borderRadius: 8,
     borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 10,
+    paddingHorizontal: 10,
+    gap: 7,
+    marginBottom: 8,
   },
   searchInput: {
     flex: 1,
-    fontSize: 15,
-    paddingVertical: 6,
+    fontSize: 14,
+    paddingVertical: 0,
   },
-  actionRow: {
+  segmented: {
     flexDirection: "row",
-    gap: 8,
-    marginBottom: 10,
+    padding: 2,
+    borderRadius: 8,
+    marginBottom: 12,
   },
-  actionBtn: {
+  segBtn: {
     flex: 1,
-    height: 40,
-    borderRadius: 12,
+    height: 28,
+    borderRadius: 6,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
   },
-  actionBtnPrimaryText: {
-    color: "#ffffff",
-    fontSize: 13.5,
-    fontWeight: "600",
-  },
-  actionBtnText: {
-    fontSize: 13.5,
-    fontWeight: "600",
-  },
-  hintBanner: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 10,
-    marginBottom: 10,
-  },
-  hintText: {
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  filterRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginBottom: 10,
-  },
-  filterChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: StyleSheet.hairlineWidth,
-  },
-  filterText: {
+  segText: {
     fontSize: 12.5,
-    fontWeight: "600",
+    fontWeight: "500",
   },
   listContent: {
     paddingBottom: 24,
   },
-  openingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    bottom: 10,
-    borderRadius: 14,
+  downloadingOverlay: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
+    paddingBottom: 10,
   },
-  openingText: {
-    fontSize: 13,
-    fontWeight: "600",
+  downloadingText: {
+    fontSize: 12,
   },
   emptyBox: {
-    alignItems: "center",
-    paddingTop: 64,
+    paddingTop: 48,
     paddingHorizontal: 24,
-    gap: 8,
+    alignItems: "center",
+    gap: 6,
   },
   emptyTitle: {
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: "600",
   },
   emptyHint: {
-    fontSize: 13.5,
+    fontSize: 13,
     textAlign: "center",
-    lineHeight: 20,
+    lineHeight: 19,
   },
 });

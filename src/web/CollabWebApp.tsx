@@ -14,22 +14,22 @@ const isMobileViewport = () => typeof window !== "undefined" && window.innerWidt
 
 const LABELS = {
   zh: {
-    shared: "只读分享",
+    shared: "只读",
     live: "实时协作",
-    connecting: "正在连接…",
+    connecting: "连接中…",
     connected: "已连接",
-    reconnecting: "正在重连…",
-    error: "连接出错",
-    loading: "正在解密并加载画布…",
-    notFound: "找不到这个分享链接，可能已过期或被清理。",
-    badKey: "无法解密：请确认分享链接完整（包含 # 后的密钥）。",
-    viewMode: "仅查看",
+    reconnecting: "重连中…",
+    error: "连接失败",
+    loading: "加载中…",
+    notFound: "找不到这个链接，可能已过期。",
+    badKey: "无法解密，请确认链接完整。",
+    viewMode: "只读",
     editMode: "编辑",
-    copyLink: "复制链接",
-    copied: "已复制",
+    copyLink: "拷贝链接",
+    copied: "已拷贝",
     download: "下载 .excalidraw",
     namePlaceholder: "你的名字",
-    e2ee: "端到端加密 · 服务器看不到画布内容",
+    e2ee: "端到端加密",
     peers: "{n} 人在线",
     slides: "幻灯片",
     prevSlide: "上一页",
@@ -37,22 +37,22 @@ const LABELS = {
     fitAll: "全览",
   },
   en: {
-    shared: "Read-only Share",
-    live: "Live Collaboration",
+    shared: "Read-only",
+    live: "Live",
     connecting: "Connecting…",
     connected: "Live",
     reconnecting: "Reconnecting…",
-    error: "Connection error",
-    loading: "Decrypting drawing…",
-    notFound: "This share link was not found or has expired.",
-    badKey: "Unable to decrypt: make sure the full URL (including the # key) was copied.",
+    error: "Connection failed",
+    loading: "Loading…",
+    notFound: "Link not found or expired.",
+    badKey: "Can't decrypt — check the full link.",
     viewMode: "View",
     editMode: "Edit",
     copyLink: "Copy Link",
     copied: "Copied",
     download: "Download .excalidraw",
     namePlaceholder: "Your name",
-    e2ee: "End-to-end encrypted — server never sees your drawing",
+    e2ee: "End-to-end encrypted",
     peers: "{n} online",
     slides: "Slides",
     prevSlide: "Previous",
@@ -283,43 +283,40 @@ export default function CollabWebApp({ initialLink }: { initialLink: ParsedColla
     <div className={`web-collab ${theme}`}>
       <header className="web-bar">
         <div className="web-brand">
-          <span className="web-logo" aria-hidden="true">E</span>
-          <div className="web-title-wrap">
-            <b className="web-title">{title}</b>
-            <span className={`web-status ${link.kind === "room" ? status : "share"}`}>
-              <i />
-              {statusText}
-            </span>
-          </div>
+          <svg className="web-logo" width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="21" height="21" rx="6" className="web-logo-tile" />
+            <g className="web-logo-mark">
+              <rect x="6.35" y="5" width="3.1" height="13.7" />
+              <rect x="9.45" y="5" width="8" height="3.2" />
+              <path d="M9.25 11.7 13.05 10.05 16.95 11.7 13.05 13.35Z" />
+              <ellipse cx="13.55" cy="16.95" rx="4.1" ry="1.8" />
+            </g>
+          </svg>
+          <b className="web-title">{title}</b>
+          <span className={`web-status ${link.kind === "room" ? status : "share"}`}>
+            <i />
+            {statusText}
+          </span>
         </div>
 
         <div className="web-actions">
           {link.kind === "room" && (
-            <div className="web-peers" onClick={() => setNameOpen((v) => !v)} title={username}>
-              {peers.slice(0, 4).map((p) => (
-                <span
-                  key={p.clientId}
-                  className="web-avatar"
-                  style={{ background: p.color.background, borderColor: p.color.stroke, color: p.color.stroke }}
-                  title={p.username}
-                >
-                  {(p.username || "?").slice(0, 1).toUpperCase()}
-                </span>
-              ))}
-            </div>
+            <button className="web-btn" onClick={() => setNameOpen((v) => !v)} title={username}>
+              {username}
+            </button>
           )}
 
           {link.kind === "room" && !link.readOnly && (
-            <button className={`web-btn ${!viewOnly ? "active" : ""}`} onClick={() => setViewOnly((v) => !v)}>
+            <button className="web-btn" onClick={() => setViewOnly((v) => !v)}>
               {viewOnly ? L.editMode : L.viewMode}
             </button>
           )}
 
-          <button className="web-btn" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} title="Theme">
+          <button className="web-icon" onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))} title="Theme">
             {theme === "dark" ? "☀" : "☾"}
           </button>
 
-          <button className="web-btn" onClick={downloadExcalidraw} title={L.download}>
+          <button className="web-icon" onClick={downloadExcalidraw} title={L.download}>
             ↓
           </button>
 

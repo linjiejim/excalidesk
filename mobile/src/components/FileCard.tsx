@@ -4,11 +4,13 @@ import type { EffectiveLang, I18nKey } from "../i18n";
 import { translate } from "../i18n";
 import type { ThemeColors } from "../theme";
 import type { DrawingFileItem } from "../types";
+import { hapticSelection, NativeIcon } from "./NativeUI";
 import { SceneThumbnail } from "./SceneThumbnail";
 
 interface Props {
   item: DrawingFileItem;
   starred: boolean;
+  isLast: boolean;
   theme: ThemeColors;
   lang: EffectiveLang;
   onPress: () => void;
@@ -26,73 +28,93 @@ function formatDate(ts: number, lang: EffectiveLang): string {
   return d.toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", { month: "short", day: "numeric" });
 }
 
-export const FileCard = React.memo(function FileCard({ item, starred, theme, lang, onPress, onToggleStar }: Props) {
+export const FileCard = React.memo(function FileCard({
+  item,
+  starred,
+  isLast,
+  theme,
+  lang,
+  onPress,
+  onToggleStar,
+}: Props) {
   const t = (k: I18nKey, vars?: Record<string, string | number>) => translate(lang, k, vars);
 
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [
-        styles.card,
-        {
-          backgroundColor: theme.card,
-          borderColor: theme.border,
-          opacity: pressed ? 0.85 : 1,
-        },
+        styles.row,
+        { backgroundColor: pressed ? theme.pressed : "transparent" },
       ]}
     >
-      <SceneThumbnail rawJson={item.rawJson} theme={theme} />
+      <SceneThumbnail rawJson={item.rawJson} theme={theme} width={56} height={42} />
 
-      <View style={styles.body}>
-        <View style={styles.titleRow}>
-          <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
-            {item.name}
+      <View style={[styles.rightWrap, !isLast && { borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: theme.separator }]}>
+        <View style={styles.body}>
+          <View style={styles.titleRow}>
+            <Text style={[styles.name, { color: theme.text }]} numberOfLines={1}>
+              {item.name}
+            </Text>
+            {item.isUbiquitous && !item.downloaded && (
+              <NativeIcon name="icloud.and.arrow.down" size={14} color={theme.muted} />
+            )}
+          </View>
+
+          <Text style={[styles.meta, { color: theme.muted }]} numberOfLines={1}>
+            {[
+              item.source === "sample" ? t("files.sampleTag") : item.folderName,
+              item.elementCount !== undefined ? t("files.elements", { n: item.elementCount }) : null,
+              item.slideCount ? t("files.slides", { n: item.slideCount }) : null,
+              formatDate(item.mtime, lang),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </Text>
-          {item.isUbiquitous && !item.downloaded && (
-            <Text style={[styles.cloudTag, { color: theme.muted }]}>☁</Text>
-          )}
         </View>
 
-        <Text style={[styles.meta, { color: theme.muted }]} numberOfLines={1}>
-          {[
-            item.source === "sample" ? t("files.sampleTag") : item.folderName,
-            item.elementCount !== undefined ? t("files.elements", { n: item.elementCount }) : null,
-            item.slideCount ? t("files.slides", { n: item.slideCount }) : null,
-            formatDate(item.mtime, lang),
-          ]
-            .filter(Boolean)
-            .join(" · ")}
-        </Text>
-      </View>
+        <Pressable
+          onPress={(e) => {
+            e.stopPropagation();
+            hapticSelection();
+            onToggleStar();
+          }}
+          hitSlop={10}
+          style={styles.starBtn}
+          accessibilityLabel={starred ? "Unstar" : "Star"}
+        >
+          <NativeIcon
+            name={starred ? "star.fill" : "star"}
+            size={16}
+            color={starred ? theme.text : theme.muted}
+          />
+        </Pressable>
 
-      <Pressable
-        onPress={(e) => {
-          e.stopPropagation();
-          onToggleStar();
-        }}
-        hitSlop={10}
-        style={styles.starBtn}
-      >
-        <Text style={{ fontSize: 16, color: starred ? theme.text : theme.muted }}>{starred ? "★" : "☆"}</Text>
-      </Pressable>
+        <NativeIcon name="chevron.right" size={13} color={theme.muted} weight="semibold" />
+      </View>
     </Pressable>
   );
 });
 
 const styles = StyleSheet.create({
-  card: {
+  row: {
     flexDirection: "row",
     alignItems: "center",
-    padding: 9,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 8,
+    paddingLeft: 12,
     gap: 11,
+  },
+  rightWrap: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 10,
+    paddingRight: 12,
+    gap: 8,
   },
   body: {
     flex: 1,
     minWidth: 0,
-    gap: 3,
+    gap: 2,
   },
   titleRow: {
     flexDirection: "row",
@@ -100,17 +122,14 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   name: {
-    fontSize: 14.5,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "500",
     flexShrink: 1,
   },
-  cloudTag: {
-    fontSize: 12,
-  },
   meta: {
-    fontSize: 12,
+    fontSize: 12.5,
   },
   starBtn: {
-    padding: 6,
+    padding: 4,
   },
 });

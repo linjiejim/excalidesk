@@ -1,10 +1,11 @@
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { SavedICloudFolder } from "../../modules/icloud-files";
 import { isNativeICloudModuleAvailable } from "../../modules/icloud-files";
 import type { EffectiveLang, I18nKey } from "../i18n";
 import { translate } from "../i18n";
 import type { ThemeColors } from "../theme";
 import type { LangSetting, MobileSettings, ThemeSetting } from "../types";
+import { GroupedSection, NativeIcon, NativeSegmented, showNativeActionSheet } from "../components/NativeUI";
 
 interface Props {
   settings: MobileSettings;
@@ -15,35 +16,6 @@ interface Props {
   onAddFolder: () => void;
   onRemoveFolder: (id: string) => void;
   onClearCache: () => void;
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  theme,
-  onChange,
-}: {
-  value: T;
-  options: [T, string][];
-  theme: ThemeColors;
-  onChange: (v: T) => void;
-}) {
-  return (
-    <View style={[styles.segmented, { backgroundColor: theme.accentSoft }]}>
-      {options.map(([v, label]) => {
-        const active = v === value;
-        return (
-          <Pressable
-            key={v}
-            onPress={() => onChange(v)}
-            style={[styles.segBtn, active && { backgroundColor: theme.surface }]}
-          >
-            <Text style={[styles.segText, { color: active ? theme.text : theme.muted }]}>{label}</Text>
-          </Pressable>
-        );
-      })}
-    </View>
-  );
 }
 
 export function SettingsScreen({
@@ -58,86 +30,129 @@ export function SettingsScreen({
 }: Props) {
   const t = (k: I18nKey) => translate(lang, k);
 
+  const confirmRemoveFolder = (f: SavedICloudFolder) => {
+    showNativeActionSheet({
+      title: f.name,
+      cancelLabel: t("common.cancel"),
+      items: [{ label: t("settings.remove"), destructive: true, onPress: () => onRemoveFolder(f.id) }],
+    });
+  };
+
+  const confirmClearCache = () => {
+    showNativeActionSheet({
+      title: t("settings.clearCache"),
+      cancelLabel: t("common.cancel"),
+      items: [{ label: t("settings.clearCache"), destructive: true, onPress: onClearCache }],
+    });
+  };
+
   return (
-    <ScrollView style={[styles.root, { backgroundColor: theme.bg }]} contentContainerStyle={styles.content}>
-      <Text style={[styles.title, { color: theme.text }]}>{t("settings.title")}</Text>
+    <ScrollView
+      style={[styles.root, { backgroundColor: theme.bg }]}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardDismissMode="on-drag"
+    >
+      <GroupedSection header={t("settings.appearance")} theme={theme}>
+        <View style={styles.segmentRow}>
+          <NativeSegmented<ThemeSetting>
+            value={settings.theme}
+            theme={theme}
+            onChange={(v) => onUpdateSettings({ theme: v })}
+            options={[
+              ["system", t("settings.system")],
+              ["light", t("settings.light")],
+              ["dark", t("settings.dark")],
+            ]}
+          />
+        </View>
+      </GroupedSection>
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.label, { color: theme.text }]}>{t("settings.appearance")}</Text>
-        <Segmented<ThemeSetting>
-          value={settings.theme}
-          theme={theme}
-          onChange={(v) => onUpdateSettings({ theme: v })}
-          options={[
-            ["system", t("settings.system")],
-            ["light", t("settings.light")],
-            ["dark", t("settings.dark")],
-          ]}
-        />
+      <GroupedSection header={t("settings.language")} theme={theme}>
+        <View style={styles.segmentRow}>
+          <NativeSegmented<LangSetting>
+            value={settings.lang}
+            theme={theme}
+            onChange={(v) => onUpdateSettings({ lang: v })}
+            options={[
+              ["system", t("settings.system")],
+              ["zh", "简体中文"],
+              ["en", "English"],
+            ]}
+          />
+        </View>
+      </GroupedSection>
 
-        <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-        <Text style={[styles.label, { color: theme.text }]}>{t("settings.language")}</Text>
-        <Segmented<LangSetting>
-          value={settings.lang}
-          theme={theme}
-          onChange={(v) => onUpdateSettings({ lang: v })}
-          options={[
-            ["system", t("settings.system")],
-            ["zh", "简体中文"],
-            ["en", "English"],
-          ]}
-        />
-      </View>
-
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.label, { color: theme.text }]}>{t("settings.icloudFolders")}</Text>
-        <Text style={[styles.hint, { color: isNativeICloudModuleAvailable ? theme.live : theme.muted }]}>
-          {isNativeICloudModuleAvailable ? `● ${t("settings.nativeActive")}` : t("settings.nativeFallback")}
-        </Text>
-
+      <GroupedSection
+        header={t("settings.icloudFolders")}
+        footer={isNativeICloudModuleAvailable ? t("settings.nativeActive") : t("settings.nativeFallback")}
+        theme={theme}
+      >
         {folders.length === 0 ? (
-          <Text style={[styles.muted, { color: theme.muted }]}>{t("settings.noFolders")}</Text>
+          <View style={styles.row}>
+            <Text style={[styles.muted, { color: theme.muted }]}>{t("settings.noFolders")}</Text>
+          </View>
         ) : (
-          folders.map((f) => (
-            <View key={f.id} style={[styles.folderRow, { borderTopColor: theme.border }]}>
-              <Text style={[styles.folderName, { color: theme.text }]}>{f.name}</Text>
-              <Pressable onPress={() => onRemoveFolder(f.id)}>
-                <Text style={{ color: theme.danger, fontSize: 12.5 }}>{t("settings.remove")}</Text>
-              </Pressable>
-            </View>
+          folders.map((f, idx) => (
+            <Pressable
+              key={f.id}
+              onPress={() => confirmRemoveFolder(f)}
+              style={({ pressed }) => [
+                styles.row,
+                { backgroundColor: pressed ? theme.pressed : "transparent" },
+                (idx < folders.length - 1 || isNativeICloudModuleAvailable) && {
+                  borderBottomWidth: StyleSheet.hairlineWidth,
+                  borderBottomColor: theme.separator,
+                },
+              ]}
+            >
+              <View style={styles.rowLeft}>
+                <NativeIcon name={f.isICloud ? "icloud" : "folder"} size={17} color={theme.muted} />
+                <Text style={[styles.rowTitle, { color: theme.text }]} numberOfLines={1}>
+                  {f.name}
+                </Text>
+              </View>
+              <Text style={{ color: theme.danger, fontSize: 14 }}>{t("settings.remove")}</Text>
+            </Pressable>
           ))
         )}
 
         {isNativeICloudModuleAvailable && (
-          <Pressable onPress={onAddFolder} style={[styles.outlineBtn, { borderColor: theme.border }]}>
-            <Text style={{ color: theme.text, fontWeight: "500", fontSize: 13 }}>+ {t("settings.addFolder")}</Text>
+          <Pressable
+            onPress={onAddFolder}
+            style={({ pressed }) => [styles.row, { backgroundColor: pressed ? theme.pressed : "transparent" }]}
+          >
+            <View style={styles.rowLeft}>
+              <NativeIcon name="plus" size={16} color={theme.text} weight="medium" />
+              <Text style={[styles.rowTitle, { color: theme.text }]}>{t("settings.addFolder")}</Text>
+            </View>
           </Pressable>
         )}
-      </View>
+      </GroupedSection>
 
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <Text style={[styles.label, { color: theme.text }]}>{t("settings.server")}</Text>
-        <TextInput
-          value={settings.collabServer}
-          onChangeText={(collabServer) => onUpdateSettings({ collabServer })}
-          placeholder="http://localhost:3456"
-          placeholderTextColor={theme.muted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.bg }]}
-        />
-      </View>
+      <GroupedSection header={t("settings.server")} theme={theme}>
+        <View style={styles.inputWrap}>
+          <TextInput
+            value={settings.collabServer}
+            onChangeText={(collabServer) => onUpdateSettings({ collabServer })}
+            placeholder="http://localhost:3456"
+            placeholderTextColor={theme.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            style={[styles.input, { color: theme.text }]}
+          />
+        </View>
+      </GroupedSection>
 
-      <Pressable
-        onPress={() => {
-          onClearCache();
-          Alert.alert(t("settings.title"), t("settings.cacheCleared"));
-        }}
-        style={[styles.dangerBtn, { backgroundColor: theme.surface, borderColor: theme.border }]}
-      >
-        <Text style={{ color: theme.danger, fontWeight: "500", fontSize: 14 }}>{t("settings.clearCache")}</Text>
-      </Pressable>
+      <GroupedSection theme={theme}>
+        <Pressable
+          onPress={confirmClearCache}
+          style={({ pressed }) => [styles.centerRow, { backgroundColor: pressed ? theme.pressed : "transparent" }]}
+        >
+          <Text style={{ color: theme.danger, fontSize: 16 }}>{t("settings.clearCache")}</Text>
+        </Pressable>
+      </GroupedSection>
     </ScrollView>
   );
 }
@@ -147,83 +162,46 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   content: {
-    paddingHorizontal: 14,
-    paddingBottom: 32,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: "600",
-    letterSpacing: -0.3,
+    paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 12,
+    paddingBottom: 36,
   },
-  card: {
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 12,
-    gap: 8,
-    marginBottom: 12,
+  segmentRow: {
+    padding: 8,
   },
-  label: {
-    fontSize: 13.5,
-    fontWeight: "600",
-  },
-  hint: {
-    fontSize: 12,
-    lineHeight: 17,
-  },
-  muted: {
-    fontSize: 12.5,
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    marginVertical: 4,
-  },
-  segmented: {
-    flexDirection: "row",
-    padding: 2,
-    borderRadius: 8,
-  },
-  segBtn: {
-    flex: 1,
-    height: 28,
-    borderRadius: 6,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  segText: {
-    fontSize: 12.5,
-    fontWeight: "500",
-  },
-  folderRow: {
+  row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
+    minHeight: 44,
+    paddingHorizontal: 14,
+    gap: 10,
   },
-  folderName: {
-    fontSize: 13.5,
-  },
-  outlineBtn: {
-    height: 34,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
+  rowLeft: {
+    flexDirection: "row",
     alignItems: "center",
+    gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  rowTitle: {
+    fontSize: 15.5,
+    flexShrink: 1,
+  },
+  muted: {
+    fontSize: 14.5,
+  },
+  inputWrap: {
+    paddingHorizontal: 14,
+    height: 44,
     justifyContent: "center",
-    marginTop: 2,
   },
   input: {
-    height: 36,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    fontSize: 13,
+    fontSize: 15,
+    paddingVertical: 0,
   },
-  dangerBtn: {
-    height: 40,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
+  centerRow: {
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

@@ -11,6 +11,7 @@ import { parseExcalidrawJson, summarizeScene, type SlideInfo } from "../lib/exca
 import { buildViewerHtml } from "../lib/viewerHtml";
 import { DARK_THEME, LIGHT_THEME, type ThemeColors } from "../theme";
 import type { ViewerTarget } from "../types";
+import { hapticLight, hapticSelection, NativeBlur, NativeIcon } from "../components/NativeUI";
 import { SlideBar } from "../components/SlideBar";
 
 interface Props {
@@ -139,12 +140,14 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
   }, [handlePayload]);
 
   const toggleTheme = () => {
+    hapticSelection();
     const next = !dark;
     setDark(next);
     sendCommand("setTheme", [next]);
   };
 
   const fitScreen = () => {
+    hapticLight();
     setSlideIdx(-1);
     sendCommand("fit");
   };
@@ -210,7 +213,7 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
 
       {loading && (
         <View style={[styles.overlayCenter, { backgroundColor: theme.bg }]} pointerEvents="none">
-          <ActivityIndicator size="large" color={theme.accent} />
+          <ActivityIndicator size="large" color={theme.muted} />
           <Text style={[styles.statusText, { color: theme.muted }]}>
             {target.kind === "collab" ? t("viewer.decrypting") : t("files.downloading")}
           </Text>
@@ -228,9 +231,9 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
 
       {hudVisible && (
         <SafeAreaView style={styles.topHudWrap} edges={["top"]} pointerEvents="box-none">
-          <View style={[styles.topBar, { backgroundColor: theme.hudBg, borderColor: theme.border }]}>
-            <Pressable onPress={onClose} style={styles.iconBtn} hitSlop={8}>
-              <Text style={[styles.backGlyph, { color: theme.text }]}>‹</Text>
+          <NativeBlur dark={dark} style={[styles.topBar, { borderColor: theme.border }]}>
+            <Pressable onPress={onClose} style={styles.iconBtn} hitSlop={8} accessibilityLabel="Back">
+              <NativeIcon name="chevron.left" size={18} color={theme.text} weight="semibold" />
             </Pressable>
 
             <View style={styles.titleBlock}>
@@ -245,26 +248,26 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
               </View>
             </View>
 
-            <Pressable onPress={toggleTheme} style={styles.iconBtn} hitSlop={6}>
-              <Text style={{ fontSize: 16, color: theme.text }}>{dark ? "☀" : "☾"}</Text>
+            <Pressable onPress={toggleTheme} style={styles.iconBtn} hitSlop={6} accessibilityLabel="Toggle theme">
+              <NativeIcon name={dark ? "sun.max" : "moon"} size={17} color={theme.text} />
             </Pressable>
 
-            <Pressable onPress={() => void shareDrawing()} style={styles.shareBtn} hitSlop={6}>
-              <Text style={{ fontSize: 13, fontWeight: "500", color: theme.text }}>{t("viewer.share")}</Text>
+            <Pressable onPress={() => void shareDrawing()} style={styles.iconBtn} hitSlop={6} accessibilityLabel={t("viewer.share")}>
+              <NativeIcon name="square.and.arrow.up" size={17} color={theme.text} />
             </Pressable>
-          </View>
+          </NativeBlur>
         </SafeAreaView>
       )}
 
       {hudVisible && !loading && !error && (
         <SafeAreaView style={styles.bottomHudWrap} edges={["bottom"]} pointerEvents="box-none">
           <View style={styles.bottomRow} pointerEvents="box-none">
-            <View style={[styles.zoomPill, { backgroundColor: theme.hudBg, borderColor: theme.border }]}>
+            <NativeBlur dark={dark} style={[styles.zoomPill, { borderColor: theme.border }]}>
               <Text style={[styles.zoomText, { color: theme.muted }]}>{zoomPct}%</Text>
-              <Pressable onPress={fitScreen} style={[styles.fitBtn, { borderLeftColor: theme.border }]}>
+              <Pressable onPress={fitScreen} style={[styles.fitBtn, { borderLeftColor: theme.separator }]}>
                 <Text style={[styles.fitText, { color: theme.text }]}>{t("viewer.fit")}</Text>
               </Pressable>
-            </View>
+            </NativeBlur>
 
             <SlideBar slides={slides} activeIndex={slideIdx} theme={theme} lang={lang} onSelectSlide={selectSlide} />
           </View>
@@ -313,26 +316,18 @@ const styles = StyleSheet.create({
   topBar: {
     flexDirection: "row",
     alignItems: "center",
-    height: 48,
-    borderRadius: 14,
+    height: 46,
+    borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 6,
-    gap: 4,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    paddingHorizontal: 4,
+    gap: 2,
+    overflow: "hidden",
   },
   iconBtn: {
     width: 36,
     height: 36,
     alignItems: "center",
     justifyContent: "center",
-  },
-  backGlyph: {
-    fontSize: 28,
-    lineHeight: 30,
-    marginTop: -2,
   },
   titleBlock: {
     flex: 1,
@@ -355,12 +350,6 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 11.5,
   },
-  shareBtn: {
-    paddingHorizontal: 10,
-    height: 32,
-    alignItems: "center",
-    justifyContent: "center",
-  },
   bottomHudWrap: {
     position: "absolute",
     bottom: 0,
@@ -379,15 +368,12 @@ const styles = StyleSheet.create({
   zoomPill: {
     flexDirection: "row",
     alignItems: "center",
-    height: 38,
+    height: 36,
     borderRadius: 999,
     borderWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 12,
     gap: 10,
-    shadowColor: "#000",
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    overflow: "hidden",
   },
   zoomText: {
     fontSize: 12.5,

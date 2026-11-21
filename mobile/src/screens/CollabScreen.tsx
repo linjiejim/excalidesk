@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import type { EffectiveLang, I18nKey } from "../i18n";
 import { translate } from "../i18n";
 import { parseMobileCollabLink } from "../lib/collabLinks";
 import type { ThemeColors } from "../theme";
 import type { RecentCollabLink } from "../types";
+import { GroupedSection, hapticSelection, NativeIcon } from "../components/NativeUI";
 
 interface Props {
   recentLinks: RecentCollabLink[];
@@ -24,156 +25,158 @@ export function CollabScreen({ recentLinks, theme, lang, onOpenCollabUrl }: Prop
       setError(t("collab.invalid"));
       return;
     }
+    hapticSelection();
     setError("");
     onOpenCollabUrl(input.trim());
     setInput("");
   };
 
   return (
-    <View style={[styles.root, { backgroundColor: theme.bg }]}>
-      <Text style={[styles.title, { color: theme.text }]}>{t("collab.title")}</Text>
-
-      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-        <TextInput
-          value={input}
-          onChangeText={(v) => {
-            setInput(v);
-            if (error) setError("");
-          }}
-          placeholder={t("collab.placeholder")}
-          placeholderTextColor={theme.muted}
-          autoCapitalize="none"
-          autoCorrect={false}
-          style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.bg }]}
-          returnKeyType="go"
-          onSubmitEditing={submit}
-        />
-        {!!error && <Text style={[styles.err, { color: theme.danger }]}>{error}</Text>}
+    <ScrollView
+      style={[styles.root, { backgroundColor: theme.bg }]}
+      contentContainerStyle={styles.content}
+      contentInsetAdjustmentBehavior="automatic"
+      keyboardDismissMode="on-drag"
+    >
+      <GroupedSection theme={theme} footer={error || t("collab.e2ee")}>
+        <View style={styles.inputRow}>
+          <NativeIcon name="link" size={16} color={theme.muted} />
+          <TextInput
+            value={input}
+            onChangeText={(v) => {
+              setInput(v);
+              if (error) setError("");
+            }}
+            placeholder={t("collab.placeholder")}
+            placeholderTextColor={theme.muted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            clearButtonMode="while-editing"
+            style={[styles.input, { color: theme.text }]}
+            returnKeyType="go"
+            onSubmitEditing={submit}
+          />
+        </View>
+        <View style={[styles.hairline, { backgroundColor: theme.separator }]} />
         <Pressable
           onPress={submit}
-          style={({ pressed }) => [styles.primaryBtn, { backgroundColor: theme.accent, opacity: pressed ? 0.85 : 1 }]}
+          style={({ pressed }) => [
+            styles.actionRow,
+            { backgroundColor: pressed ? theme.pressed : "transparent" },
+          ]}
         >
-          <Text style={[styles.primaryBtnText, { color: theme.accentText }]}>{t("collab.open")}</Text>
+          <Text style={[styles.actionText, { color: input.trim() ? theme.text : theme.muted }]}>
+            {t("collab.open")}
+          </Text>
         </Pressable>
-        <Text style={[styles.e2ee, { color: theme.muted }]}>{t("collab.e2ee")}</Text>
-      </View>
+      </GroupedSection>
 
-      <Text style={[styles.sectionTitle, { color: theme.muted }]}>{t("collab.recent")}</Text>
-
-      <FlatList
-        data={recentLinks}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <Pressable
-            onPress={() => onOpenCollabUrl(item.url)}
-            style={({ pressed }) => [
-              styles.linkRow,
-              { backgroundColor: theme.surface, borderColor: theme.border, opacity: pressed ? 0.85 : 1 },
-            ]}
-          >
-            <View style={styles.linkTop}>
-              <Text style={[styles.linkTitle, { color: theme.text }]} numberOfLines={1}>
-                {item.title}
-              </Text>
-              <View style={[styles.badge, { backgroundColor: theme.accentSoft }]}>
-                <Text style={[styles.badgeText, { color: item.kind === "room" ? theme.live : theme.muted }]}>
-                  {item.kind === "room" ? t("collab.roomBadge") : t("collab.shareBadge")}
-                </Text>
+      {recentLinks.length > 0 && (
+        <GroupedSection header={t("collab.recent")} theme={theme}>
+          {recentLinks.map((item, idx) => (
+            <Pressable
+              key={item.id}
+              onPress={() => onOpenCollabUrl(item.url)}
+              style={({ pressed }) => [
+                styles.linkRow,
+                { backgroundColor: pressed ? theme.pressed : "transparent" },
+              ]}
+            >
+              <View
+                style={[
+                  styles.linkInner,
+                  idx < recentLinks.length - 1 && {
+                    borderBottomWidth: StyleSheet.hairlineWidth,
+                    borderBottomColor: theme.separator,
+                  },
+                ]}
+              >
+                <View style={styles.linkBody}>
+                  <View style={styles.linkTop}>
+                    {item.kind === "room" && <View style={[styles.dot, { backgroundColor: theme.live }]} />}
+                    <Text style={[styles.linkTitle, { color: theme.text }]} numberOfLines={1}>
+                      {item.title}
+                    </Text>
+                  </View>
+                  <Text style={[styles.linkUrl, { color: theme.muted }]} numberOfLines={1}>
+                    {item.url}
+                  </Text>
+                </View>
+                <NativeIcon name="chevron.right" size={13} color={theme.muted} weight="semibold" />
               </View>
-            </View>
-            <Text style={[styles.linkUrl, { color: theme.muted }]} numberOfLines={1}>
-              {item.url}
-            </Text>
-          </Pressable>
-        )}
-        ListEmptyComponent={
-          <Text style={[styles.empty, { color: theme.muted }]}>{t("collab.recentEmpty")}</Text>
-        }
-      />
-    </View>
+            </Pressable>
+          ))}
+        </GroupedSection>
+      )}
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    paddingHorizontal: 14,
   },
-  title: {
-    fontSize: 18,
-    fontWeight: "600",
-    letterSpacing: -0.3,
+  content: {
+    paddingHorizontal: 16,
     paddingTop: 12,
-    paddingBottom: 12,
+    paddingBottom: 32,
   },
-  card: {
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    padding: 12,
-    gap: 8,
-    marginBottom: 18,
+  inputRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    height: 46,
+    gap: 10,
   },
   input: {
-    height: 38,
-    borderRadius: 8,
-    borderWidth: StyleSheet.hairlineWidth,
-    paddingHorizontal: 10,
-    fontSize: 13.5,
+    flex: 1,
+    fontSize: 15,
+    paddingVertical: 0,
   },
-  err: {
-    fontSize: 12,
+  hairline: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 14,
   },
-  primaryBtn: {
-    height: 38,
-    borderRadius: 8,
+  actionRow: {
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryBtnText: {
-    fontSize: 14,
-    fontWeight: "500",
-  },
-  e2ee: {
-    fontSize: 11.5,
-  },
-  sectionTitle: {
-    fontSize: 11.5,
+  actionText: {
+    fontSize: 16,
     fontWeight: "600",
-    marginBottom: 8,
-    paddingHorizontal: 2,
   },
   linkRow: {
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    marginBottom: 8,
-    gap: 3,
+    paddingLeft: 14,
+  },
+  linkInner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 11,
+    paddingRight: 14,
+    gap: 10,
+  },
+  linkBody: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
   },
   linkTop: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
+    gap: 6,
+  },
+  dot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
   },
   linkTitle: {
-    fontSize: 14,
-    fontWeight: "600",
+    fontSize: 15,
+    fontWeight: "500",
     flex: 1,
   },
   linkUrl: {
-    fontSize: 11.5,
-  },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 5,
-  },
-  badgeText: {
-    fontSize: 11,
-    fontWeight: "500",
-  },
-  empty: {
     fontSize: 12.5,
-    paddingHorizontal: 2,
   },
 });

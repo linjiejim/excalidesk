@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Alert, Pressable, Share, StyleSheet, Text, View } from "react-native";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ActivityIndicator, Alert, Platform, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import * as FileSystem from "expo-file-system";
@@ -24,6 +24,7 @@ interface Props {
 export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose }: Props) {
   const t = (k: I18nKey, vars?: Record<string, string | number>) => translate(lang, k, vars);
   const webRef = useRef<WebView>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const [dark, setDark] = useState(initialDark);
   const theme: ThemeColors = dark ? DARK_THEME : LIGHT_THEME;
@@ -48,13 +49,18 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
   const slides: SlideInfo[] = summary?.slides ?? [];
   const html = useMemo(() => buildViewerHtml({ dark: initialDark }), [initialDark]);
 
-  const sendToWeb = useCallback((script: string) => {
-    webRef.current?.injectJavaScript(`${script};true;`);
+  const sendCommand = useCallback((cmd: string, args: unknown[] = []) => {
+    if (Platform.OS === "web") {
+      iframeRef.current?.contentWindow?.postMessage({ __excalideskCmd: true, cmd, args }, "*");
+      return;
+    }
+    const serializedArgs = args.map((a) => JSON.stringify(a)).join(",");
+    webRef.current?.injectJavaScript(`window.__excalidesk.${cmd}(${serializedArgs});true;`);
   }, []);
 
   const handleWebBoot = useCallback(() => {
     if (target.kind === "file" && target.rawJson) {
-      sendToWeb(`window.__excalidesk.loadScene(${JSON.stringify(target.rawJson)})`);
+      sendCommand("loadScene", [target.rawJson]);
       return;
     }
     if (target.kind === "collab" && target.collabUrl) {
@@ -70,15 +76,15 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
         key: parsed.key,
         serverUrl: parsed.serverUrl || defaultServer,
       };
-      sendToWeb(`window.__excalidesk.openCollab(${JSON.stringify(cfg)})`);
+      sendCommand("openCollab", [cfg]);
     }
-  }, [target, defaultServer, sendToWeb, t]);
+  }, [target, defaultServer, sendCommand, t]);
 
-  const onMessage = useCallback(
-    (ev: WebViewMessageEvent) => {
+  const handlePayload = useCallback(
+    (raw: string) => {
       let msg: any;
       try {
-        msg = JSON.parse(ev.nativeEvent.data);
+        msg = JSON.parse(raw);
       } catch {
         return;
       }
@@ -116,15 +122,31 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
     [handleWebBoot],
   );
 
+  const onMessage = useCallback(
+    (ev: WebViewMessageEvent) => handlePayload(ev.nativeEvent.data),
+    [handlePayload],
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== "web") return;
+    const onWinMsg = (ev: MessageEvent) => {
+      if (ev.data?.__excalidesk && typeof ev.data.payload === "string") {
+        handlePayload(ev.data.payload);
+      }
+    };
+    window.addEventListener("message", onWinMsg);
+    return () => window.removeEventListener("message", onWinMsg);
+  }, [handlePayload]);
+
   const toggleTheme = () => {
     const next = !dark;
     setDark(next);
-    sendToWeb(`window.__excalidesk.setTheme(${next ? "true" : "false"})`);
+    sendCommand("setTheme", [next]);
   };
 
   const fitScreen = () => {
     setSlideIdx(-1);
-    sendToWeb("window.__excalidesk.fit()");
+    sendCommand("fit");
   };
 
   const selectSlide = (idx: number) => {
@@ -133,7 +155,7 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
       return;
     }
     setSlideIdx(idx);
-    sendToWeb(`window.__excalidesk.focusBounds(${JSON.stringify(slides[idx].bounds)})`);
+    sendCommand("focusBounds", [slides[idx].bounds]);
   };
 
   const shareDrawing = async () => {
@@ -165,17 +187,26 @@ export function ViewerScreen({ target, initialDark, lang, defaultServer, onClose
 
   return (
     <View style={[styles.root, { backgroundColor: dark ? "#121212" : "#ffffff" }]}>
-      <WebView
-        ref={webRef}
-        source={{ html }}
-        originWhitelist={["*"]}
-        javaScriptEnabled
-        domStorageEnabled
-        scrollEnabled={false}
-        bounces={false}
-        onMessage={onMessage}
-        style={styles.webview}
-      />
+      {Platform.OS === "web" ? (
+        <iframe
+          ref={iframeRef}
+          srcDoc={html}
+          title={title}
+          style={{ flex: 1, width: "100%", height: "100%", border: "none", background: "transparent" }}
+        />
+      ) : (
+        <WebView
+          ref={webRef}
+          source={{ html }}
+          originWhitelist={["*"]}
+          javaScriptEnabled
+          domStorageEnabled
+          scrollEnabled={false}
+          bounces={false}
+          onMessage={onMessage}
+          style={styles.webview}
+        />
+      )}
 
       {loading && (
         <View style={[styles.overlayCenter, { backgroundColor: theme.bg }]} pointerEvents="none">

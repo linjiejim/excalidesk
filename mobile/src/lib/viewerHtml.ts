@@ -40,7 +40,9 @@ export function buildViewerHtml(opts: { dark: boolean }): string {
   const ctx = canvas.getContext("2d");
   const post = (msg) => {
     try {
-      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(JSON.stringify(msg));
+      const payload = JSON.stringify(msg);
+      if (window.ReactNativeWebView) window.ReactNativeWebView.postMessage(payload);
+      else if (window.parent && window.parent !== window) window.parent.postMessage({ __excalidesk: true, payload }, "*");
     } catch (_) {}
   };
 
@@ -684,6 +686,13 @@ export function buildViewerHtml(opts: { dark: boolean }): string {
       void openCollab(cfg);
     },
   };
+
+  window.addEventListener("message", (ev) => {
+    const d = ev.data;
+    if (!d || !d.__excalideskCmd) return;
+    const fn = window.__excalidesk && window.__excalidesk[d.cmd];
+    if (typeof fn === "function") fn(...(d.args || []));
+  });
 
   post({ type: "booted" });
 })();

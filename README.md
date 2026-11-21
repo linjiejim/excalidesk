@@ -9,6 +9,8 @@
 - **本地历史版本**：自动留档，合并前先备份，一键恢复或另存为副本
 - **和 Agent 协作（MCP）**：Claude Code、Codex 在图上画原型和方案，你改图或按 C 钉批注，点「发回」让它接着改；多个 Agent 可同时改不同的图
 - **演示**：每个 frame 是一页，⌥⌘P 全屏放映（方向键翻页、K 激光笔、N 看备注），演讲者备注放在页下方的备注 frame 里；导出 PDF 一页一张。Agent 可以直接画一整套幻灯片
+- **分享链接与多人实时协作（可自部署）**：端到端加密（密钥只留在链接 `#` 后，服务端看不到画布内容），支持静态只读链接与多人实时协作，改动自动存回本地 `.excalidraw`；一条 `docker compose up -d` 即可自部署（详见 [docs/self-hosting.md](docs/self-hosting.md)）
+- **iOS 预览 App（Expo）**：位于 `mobile/`，移动端优先，支持通过 iCloud Drive 浏览与预览 `.excalidraw` 文件（双指缩放、深浅色、幻灯片与演讲者备注、图内文字搜索），也可直接打开分享与实时协作链接
 - **边界情况都兜住**：iCloud 冲突版本自动合并；文件在外部被删除或移走时暂停保存，不会把它写回来
 - 中英双语、浅色 / 深色 / 跟随系统（设置 ⌘,）
 - 侧边栏：右键菜单、双击改名、拖动调整工作区顺序、按修改时间 / 创建时间 / 名称排序
@@ -68,11 +70,15 @@ node scripts/site-screens.mjs      # 中 / 英 × 浅 / 深 → site/screens/，
 ## 目录
 
 ```
-src/shell/        外壳 UI 与文档会话（保存调度、增量、外部修改合并）
+src/shell/        外壳 UI 与文档会话（保存调度、增量、外部修改合并、协作接入）
+src/collab/       端到端加密（AES-GCM）协作协议、实时客户端与只读分享
+src/web/          独立浏览器预览 / 实时协作页（支持移动端浏览器）
 src/bench/        性能基准页（?bench=1）
 src-tauri/src/    Rust：文档模型与原子写、工作区扫描与 FSEvents、iCloud、菜单、120Hz、mcp/（Agent 协作）
+server/           开源可自部署中继与加密快照服务端（WebSocket + HTTP + 静态 Web 托管）
+mobile/           Expo iOS App（原生 iCloud Drive 模块、离线画布与幻灯片预览）
 bench/            基准与自测脚本、测试场景生成
-docs/             方案、P0 性能实验结果、各阶段说明
+docs/             方案、P0 性能实验结果、各阶段说明、自部署指南
 site/             官网（GitHub Pages）
 ```
 

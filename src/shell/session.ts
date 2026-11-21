@@ -9,6 +9,7 @@ import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
 import { bump, isOpenComment, nonce as newNonce, reorder, unreorder, type Order } from "./elements";
+import { notifyCollabScene, stopCollab } from "./collab";
 
 type El = { id: string; version: number; versionNonce: number; isDeleted?: boolean; [k: string]: unknown };
 type Files = Record<string, { id: string; [k: string]: unknown }>;
@@ -60,6 +61,8 @@ export class DocSession {
   private candidates: Api[] = [];
   /** apply() 时画布已挂载但 api 还没确认：等第一次 onChange 确认后再推上去，否则旧场景会把它盖掉 */
   private needsPush = false;
+  /** 正在应用远端实时协作更新：不回声广播 */
+  private applyingRemoteCollab = false;
 
   debounceMs = 800;
   maxWaitMs = 5000;
@@ -178,6 +181,7 @@ export class DocSession {
     // 规整期：只更新基线版本号，不标脏、不写盘（这些元素会跟着下一次真正的改动一起存）
     if (!this.dirty && performance.now() < this.settleUntil && !newFile) return;
     this.markDirty();
+    if (!this.applyingRemoteCollab) notifyCollabScene(this.path, elements, files);
   };
 
   private markDirty() {
@@ -460,11 +464,63 @@ export class DocSession {
     updateTab(this.path, { bannerAction: undefined, banner: t("banner.restored"), elements: this.liveCount(), comments: this.openComments() });
   }
 
+  /** 远端实时协作发来的元素增量：按元素 reconcile 合并，不污染本地撤销栈，自动标脏落盘 */
+  applyRemoteCollab(remoteElements: readonly unknown[]) {
+    const local = this.current();
+    const incoming = restoreElements(remoteElements as any, null, { repairBindings: true }) as unknown as El[];
+    const merged = reconcileElements(local.elements as any, incoming as any, local.appState) as unknown as El[];
+    const nextVersion = getSceneVersion(merged as any);
+    if (nextVersion === this.lastVersion && merged.length === local.elements.length) return;
+    this.lastVersion = nextVersion;
+    this.applyingRemoteCollab = true;
+    try {
+      this.apply(merged, {}, false);
+    } finally {
+      this.applyingRemoteCollab = false;
+    }
+    this.settleUntil = 0;
+    this.markDirty();
+    updateTab(this.path, { elements: this.liveCount(), comments: this.openComments() });
+  }
+
+  /** 远端实时协作发来的图片附件 */
+  applyRemoteFiles(files: readonly { id: string; [k: string]: unknown }[]) {
+    if (!files.length) return;
+    const map: Files = {};
+    for (const f of files) map[f.id] = f;
+    this.files = { ...this.files, ...map };
+    this.api?.addFiles(files);
+    this.markDirty();
+  }
+
+  /** 更新画布上的协作者光标与选中高亮 */
+  applyCollaborators(collaborators: Map<string, Record<string, unknown>>) {
+    this.api?.updateScene({ collaborators, captureUpdate: CaptureUpdateAction.NEVER });
+  }
+
+  /** 把只读分享链接里的画布合并到当前文档（可 ⌘Z 撤销） */
+  async importSharedScene(remoteElements: readonly unknown[], remoteFiles: Record<string, unknown>) {
+    if (this.inflight) await this.inflight;
+    await ipc.historySnapshot(this.path, "before_external").catch(() => {});
+    const local = this.current();
+    const incoming = restoreElements(remoteElements as any, null, { repairBindings: true }) as unknown as El[];
+    const next = local.elements.some((e) => !e.isDeleted)
+      ? (reconcileElements(local.elements as any, incoming as any, local.appState) as unknown as El[])
+      : incoming;
+    this.lastVersion = getSceneVersion(next as any);
+    this.apply(next, remoteFiles as Files, true);
+    this.settleUntil = 0;
+    this.markDirty();
+    await this.flush();
+    updateTab(this.path, { elements: this.liveCount(), comments: this.openComments() });
+  }
+
   isDirty() {
     return this.dirty || !!this.inflight;
   }
 
   async close() {
+    stopCollab(this.path, true);
     await this.flush();
     this.saveViewport();
     await ipc.closeDoc(this.path);

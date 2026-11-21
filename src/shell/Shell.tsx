@@ -19,6 +19,8 @@ import { checkForUpdates, scheduleUpdateChecks } from "./updater";
 import { isPresenting, paintMask, togglePresentation } from "./present";
 import { addNotes, newSlide } from "./slides";
 import { exportPdf } from "./pdf";
+import { createReadOnlyShare, joinCollabLink, startCollab, stopCollab, syncCollabUsername } from "./collab";
+import { checkServerHealth } from "../collab/share";
 
 const SELFTEST = new URLSearchParams(location.search).get("selftest") === "1";
 
@@ -63,6 +65,7 @@ function onMenu(id: string) {
     case "new_slide": return newSlide(active ? sessions.get(active) : null);
     case "add_notes": return addNotes(active ? sessions.get(active) : null);
     case "export_pdf": return exportPdf();
+    case "share": return setState({ shareOpen: true });
   }
 }
 
@@ -89,6 +92,8 @@ const Icon = {
   gear: <Svg size={15}><circle cx="8" cy="8" r="2" /><path d="M8 1.8v1.6M8 12.6v1.6M1.8 8h1.6M12.6 8h1.6M3.6 3.6l1.1 1.1M11.3 11.3l1.1 1.1M3.6 12.4l1.1-1.1M11.3 4.7l1.1-1.1" /></Svg>,
   /** 四角星，和齿轮、加号一样是细线 */
   sparkle: <Svg size={15}><path d="M8 1.15 9.2 6.35 14.85 8 9.2 9.65 8 14.85 6.8 9.65 1.15 8 6.8 6.35Z" /></Svg>,
+  /** 分享 / 实时协作 */
+  share: <Svg size={15}><circle cx="12" cy="3.5" r="1.8" /><circle cx="4" cy="8" r="1.8" /><circle cx="12" cy="12.5" r="1.8" /><path d="M5.6 7.1l4.8-2.7M5.6 8.9l4.8 2.7" /></Svg>,
 };
 
 /** App 标志：随主题变色的矢量版（工具栏形状拼成的 E：矩形竖笔，矩形、菱形、椭圆三横）。
@@ -429,6 +434,7 @@ function TabBar() {
   const tabs = useShell((s) => s.tabs);
   const active = useShell((s) => s.active);
   const sidebar = useShell((s) => s.sidebar);
+  const collabRooms = useShell((s) => s.collabRooms);
   return (
     <div className="tabbar">
       {/* 拖动区域只包标签，不包右侧弹出层，否则选命令文字会拖动窗口 */}
@@ -460,6 +466,7 @@ function TabBar() {
           >
             <span className="ellipsis">{tab.title}</span>
             <span className="tab-end">
+              {collabRooms[tab.path] && <span className="collab-dot" title={t("collab.liveTitle")} />}
               {tab.agentDot && <span className="agent-dot" title={t("agent.badge")} />}
               {tab.save === "error" ? <span className="err-dot" /> : tab.save !== "saved" ? <span className="dot" /> : null}
               <button className="icon close" onClick={(e) => { e.stopPropagation(); closeTab(tab.path); }} title={t("tab.close")}>{Icon.close}</button>
@@ -468,6 +475,7 @@ function TabBar() {
         ))}
         <button className="icon new-tab" title={t("tab.new")} onClick={() => newDoc()}>{Icon.plus}</button>
       </div>
+      <ShareConnect />
       <AgentConnect />
     </div>
   );
@@ -526,10 +534,10 @@ function useMcpConnect() {
   return { info, cmds: info ? mcpCommands(info.exe) : [], copied, copy, setEnabled };
 }
 
-function openAgentSettings() {
+function openSettingsSection(id: string) {
   setState({ settingsOpen: true });
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    const el = document.getElementById("settings-agent");
+    const el = document.getElementById(id);
     const modal = el?.closest(".modal") as HTMLElement | null;
     if (!el || !modal) return;
     const modalBox = modal.getBoundingClientRect();
@@ -539,6 +547,233 @@ function openAgentSettings() {
     }
     el.focus();
   }));
+}
+
+function openAgentSettings() {
+  openSettingsSection("settings-agent");
+}
+
+function openCollabSettings() {
+  openSettingsSection("settings-collab");
+}
+
+/** 标签栏右侧：分享只读链接 & 多人实时协作 */
+function ShareConnect() {
+  const t = useT();
+  const open = useShell((s) => s.shareOpen);
+  const active = useShell((s) => s.active);
+  const room = useShell((s) => (s.active ? s.collabRooms[s.active] : undefined));
+  const root = useRef<HTMLDivElement>(null);
+  const setOpen = (v: boolean) => setState({ shareOpen: v });
+
+  useEffect(() => {
+    if (!open) return;
+    const down = (e: MouseEvent) => {
+      if (!root.current?.contains(e.target as Node)) setState({ shareOpen: false });
+    };
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || getState().settingsOpen) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setState({ shareOpen: false });
+    };
+    window.addEventListener("mousedown", down);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("mousedown", down);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [open]);
+
+  return (
+    <div className={`agent-connect share-connect ${open ? "open" : ""} ${room ? "live" : ""}`} ref={root}>
+      <button
+        className={room ? "share-live-btn" : "icon"}
+        aria-label={t("collab.title")}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen(!open)}
+      >
+        {room ? (
+          <>
+            <span className={`collab-live-dot ${room.status}`} />
+            <span>{Math.max(1, room.peers.length)}</span>
+          </>
+        ) : (
+          Icon.share
+        )}
+      </button>
+      <span className="agent-connect-tip" aria-hidden="true">{t("collab.title")}</span>
+      {open && <ShareConnectPopover active={active} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+
+function ShareConnectPopover({ active, onClose }: { active: string | null; onClose: () => void }) {
+  const t = useT();
+  const room = useShell((s) => (active ? s.collabRooms[active] : undefined));
+  const server = useShell((s) => s.settings.collabServer);
+  const [joinInput, setJoinInput] = useState("");
+  const [shareUrl, setShareUrl] = useState("");
+  const [busy, setBusy] = useState<"start" | "join" | "share" | null>(null);
+  const [err, setErr] = useState("");
+  const [copied, setCopied] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { ref.current?.focus(); }, []);
+
+  const session = active ? sessions.get(active) : null;
+  const copy = async (k: string, text: string) => {
+    await ipc.copyText(text).catch(() => navigator.clipboard?.writeText(text));
+    setCopied(k);
+    window.setTimeout(() => setCopied(""), 1500);
+  };
+
+  const onStart = async () => {
+    if (!session) return;
+    setBusy("start");
+    setErr("");
+    try {
+      await startCollab(session);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onJoin = async () => {
+    if (!session || !joinInput.trim()) return;
+    setBusy("join");
+    setErr("");
+    try {
+      await joinCollabLink(session, joinInput);
+      setJoinInput("");
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const onCreateShare = async () => {
+    if (!session) return;
+    setBusy("share");
+    setErr("");
+    try {
+      const res = await createReadOnlyShare(session);
+      setShareUrl(res.url);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const statusLabel = room
+    ? room.status === "connected"
+      ? t("collab.status.connected", { n: Math.max(1, room.peers.length) })
+      : t(`collab.status.${room.status}` as Key)
+    : "";
+
+  return (
+    <div className="agent-pop share-pop" ref={ref} role="dialog" tabIndex={-1} aria-label={t("collab.title")}>
+      <div className="agent-pop-head">
+        <b>{t("collab.title")}</b>
+        <button className="icon" onClick={onClose} title={t("app.close")}>{Icon.close}</button>
+      </div>
+
+      {!session ? (
+        <div className="muted small">{t("collab.openDocFirst")}</div>
+      ) : (
+        <>
+          <div className="share-section">
+            <div className="share-sec-head">
+              <b>{t("collab.liveTitle")}</b>
+              {room && (
+                <span className={`collab-badge ${room.status}`}>
+                  <i />
+                  {statusLabel}
+                </span>
+              )}
+            </div>
+            {!room ? (
+              <>
+                <p className="agent-pop-desc">{t("collab.liveDesc")}</p>
+                <button className="share-primary" disabled={busy !== null} onClick={() => void onStart()}>
+                  {t("collab.start")}
+                </button>
+                <div className="share-join-row">
+                  <input
+                    className="share-input"
+                    value={joinInput}
+                    placeholder={t("collab.joinPlaceholder")}
+                    onChange={(e) => setJoinInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && void onJoin()}
+                  />
+                  <button disabled={busy !== null || !joinInput.trim()} onClick={() => void onJoin()}>
+                    {t("collab.join")}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="share-peers">
+                  {room.peers.map((p) => (
+                    <span key={p.clientId} className="share-peer-chip">
+                      <i style={{ background: p.color.stroke }} />
+                      {p.username}
+                    </span>
+                  ))}
+                </div>
+                <div className="share-link-box">
+                  <code className="ellipsis selectable" title={room.roomUrl}>{room.roomUrl}</code>
+                  <button onClick={() => void copy("room", room.roomUrl)}>
+                    {copied === "room" ? t("settings.copied") : t("settings.copy")}
+                  </button>
+                </div>
+                <div className="share-row-actions">
+                  <button onClick={() => void copy("ro", room.readOnlyUrl)}>
+                    {copied === "ro" ? t("settings.copied") : t("collab.copyReadOnly")}
+                  </button>
+                  <button className="danger" onClick={() => stopCollab(session.path)}>
+                    {t("collab.stop")}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="share-section">
+            <div className="share-sec-head">
+              <b>{t("collab.shareTitle")}</b>
+            </div>
+            <p className="agent-pop-desc">{t("collab.shareDesc")}</p>
+            <button disabled={busy !== null} onClick={() => void onCreateShare()}>
+              {busy === "share" ? t("collab.creatingShare") : t("collab.createShare")}
+            </button>
+            {shareUrl && (
+              <div className="share-link-box">
+                <code className="ellipsis selectable" title={shareUrl}>{shareUrl}</code>
+                <button onClick={() => void copy("share", shareUrl)}>
+                  {copied === "share" ? t("settings.copied") : t("settings.copy")}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {err && <div className="err small">{err}</div>}
+          <div className="muted small">{t("collab.e2eeNote")}</div>
+        </>
+      )}
+
+      <div className="share-foot">
+        <span className="muted small ellipsis" title={server}>{server}</span>
+        <button className="agent-pop-more" onClick={() => { onClose(); openCollabSettings(); }}>
+          {t("collab.settingsMore")}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 /** 标签栏最右侧。放在外壳上：欢迎页也在，不会盖住画布右上角的素材库。
@@ -976,7 +1211,63 @@ function SettingsDialog() {
           </select>
         </div>
         {inTauri && <UpdateSettings />}
+        <CollabSettings />
         <AgentSettings />
+      </div>
+    </div>
+  );
+}
+
+/** 设置 → 分享与协作：自部署服务器 URL、协作者显示名称、连通性检测 */
+function CollabSettings() {
+  const t = useT();
+  const server = useShell((s) => s.settings.collabServer);
+  const name = useShell((s) => s.settings.collabName);
+  const [testing, setTesting] = useState(false);
+  const [testState, setTestState] = useState<"" | "ok" | "fail">("");
+
+  const testServer = async () => {
+    setTesting(true);
+    setTestState("");
+    const res = await checkServerHealth(server || "http://localhost:3456");
+    setTestState(res.ok ? "ok" : "fail");
+    setTesting(false);
+  };
+
+  return (
+    <div id="settings-collab" className="settings-agent" tabIndex={-1}>
+      <div className="setting setting-col">
+        <div className="setting-head-row">
+          <span>
+            {t("settings.collabServer")}
+            <span className="setting-desc">{t("settings.collabServerDesc")}</span>
+          </span>
+        </div>
+        <div className="share-join-row">
+          <input
+            className="share-input"
+            value={server}
+            placeholder="http://localhost:3456"
+            onChange={(e) => { setTestState(""); updateSettings({ collabServer: e.target.value }); }}
+          />
+          <button disabled={testing} onClick={() => void testServer()}>
+            {testing ? t("settings.collabTesting") : t("settings.collabTest")}
+          </button>
+        </div>
+        {testState === "ok" && <span className="small collab-ok">{t("settings.collabOk")}</span>}
+        {testState === "fail" && <span className="small err">{t("settings.collabFail")}</span>}
+      </div>
+      <div className="setting">
+        <span>{t("settings.collabName")}</span>
+        <input
+          className="share-input name-input"
+          value={name}
+          placeholder={t("settings.collabNamePlaceholder")}
+          onChange={(e) => {
+            updateSettings({ collabName: e.target.value });
+            syncCollabUsername(e.target.value);
+          }}
+        />
       </div>
     </div>
   );

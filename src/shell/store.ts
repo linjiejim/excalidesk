@@ -1,6 +1,7 @@
 // 外壳状态：一个极简的外部 store，组件按 selector 订阅，外壳变化不会连带 Excalidraw 重渲染。
 import { useSyncExternalStore } from "react";
 import type { SyncStatus, TreeNode, Viewport } from "./ipc";
+import type { CollabPeer, CollabStatus } from "../collab/protocol";
 
 export type SaveState = "saved" | "dirty" | "saving" | "error";
 
@@ -11,8 +12,19 @@ export type Settings = {
   sort: "mtime" | "ctime" | "name";
   /** 启动时和之后每隔几小时查一次新版本，下载装好 */
   autoUpdate: boolean;
+  /** 分享与实时协作服务端地址（支持自部署） */
+  collabServer: string;
+  /** 实时协作里显示给协作者的名字 */
+  collabName: string;
 };
-const DEFAULT_SETTINGS: Settings = { theme: "system", lang: "system", sort: "mtime", autoUpdate: true };
+const DEFAULT_SETTINGS: Settings = {
+  theme: "system",
+  lang: "system",
+  sort: "mtime",
+  autoUpdate: true,
+  collabServer: "http://localhost:3456",
+  collabName: "",
+};
 const loadSettings = (): Settings => {
   try {
     return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem("settings") ?? "{}") };
@@ -56,6 +68,16 @@ export type Prompt = { id: string; msg: string; action?: { label: string; run: (
 /** 正在放映：哪张图、第几页、要不要叠备注 */
 export type Presenting = { path: string; index: number; total: number; notes: boolean; notesText: string };
 
+/** 某个文档的实时协作房间状态 */
+export type CollabRoomView = {
+  roomId: string;
+  roomUrl: string;
+  readOnlyUrl: string;
+  status: CollabStatus;
+  error?: string;
+  peers: CollabPeer[];
+};
+
 export type ShellState = {
   roots: string[];
   trees: Record<string, TreeNode[]>;
@@ -77,9 +99,11 @@ export type ShellState = {
   /** 实际生效的界面语言 */
   lang: "zh" | "en";
   settingsOpen: boolean;
+  shareOpen: boolean;
   agents: AgentView[];
   commentDraft: CommentDraft | null;
   presenting: Presenting | null;
+  collabRooms: Record<string, CollabRoomView>;
 };
 
 let state: ShellState = {
@@ -90,9 +114,11 @@ let state: ShellState = {
   settings: loadSettings(),
   lang: effectiveLang(loadSettings()),
   settingsOpen: false,
+  shareOpen: false,
   agents: [],
   commentDraft: null,
   presenting: null,
+  collabRooms: {},
 };
 
 export function updateSettings(patch: Partial<Settings>) {

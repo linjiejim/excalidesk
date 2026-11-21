@@ -10,6 +10,8 @@ import { t } from "./i18n";
 import { exportPdf } from "./pdf";
 import { togglePresentation } from "./present";
 import { addNotes, newSlide } from "./slides";
+import { notifyCollabPointer } from "./collab";
+import { setState, useShell } from "./store";
 
 const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: null },
@@ -17,7 +19,15 @@ const UI_OPTIONS = {
 
 function EditorImpl({ session, theme, lang, presenting = false }: { session: DocSession; theme: "light" | "dark"; lang: "zh" | "en"; presenting?: boolean }) {
   const initialData = useMemo(() => session.initialData(), [session]);
+  const isCollaborating = useShell((s) => !!s.collabRooms[session.path]);
   const onApi = useCallback((api: unknown) => session.attach(api), [session]);
+  const onPointerUpdate = useCallback(
+    (payload: { pointer: { x: number; y: number; tool: "pointer" | "laser" }; button: "down" | "up" }) => {
+      const sel = session.api?.getAppState()?.selectedElementIds as Record<string, true> | undefined;
+      notifyCollabPointer(session.path, payload.pointer, payload.button, sel);
+    },
+    [session],
+  );
   useEffect(() => () => session.attach(null), [session]);
   // C：给选中的元素加批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按不冲突）
   const onKey = useCallback(
@@ -42,6 +52,8 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
         excalidrawAPI={onApi}
         onChange={session.onChange as any}
         onScrollChange={session.onScroll as any}
+        onPointerUpdate={isCollaborating ? onPointerUpdate : undefined}
+        isCollaborating={isCollaborating}
         theme={theme}
         // 放映时不画网格：用 prop 盖住，不改 state（gridModeEnabled 会存进文件）
         gridModeEnabled={presenting ? false : undefined}
@@ -49,6 +61,8 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
         langCode={lang === "zh" ? "zh-CN" : "en"}
       >
         <MainMenu>
+          <MainMenu.Item onSelect={() => setState({ shareOpen: true })}>{t("collab.menu")}</MainMenu.Item>
+          <MainMenu.Separator />
           <MainMenu.Item onSelect={() => exportActive("png")} shortcut="⇧⌘E">{lang === "zh" ? "导出 PNG…" : "Export PNG…"}</MainMenu.Item>
           <MainMenu.Item onSelect={() => exportActive("svg")}>{lang === "zh" ? "导出 SVG…" : "Export SVG…"}</MainMenu.Item>
           <MainMenu.Item onSelect={() => exportPdf()}>{t("present.exportPdf")}</MainMenu.Item>

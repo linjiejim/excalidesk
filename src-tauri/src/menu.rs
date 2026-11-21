@@ -33,6 +33,7 @@ pub fn build<R: Runtime>(app: &AppHandle<R>, lang: &str) -> tauri::Result<Menu<R
         &item("open_folder", l("添加文件夹…", "Add Folder…"), Some("CmdOrCtrl+Shift+O"))?,
         &sep()?,
         &item("save", l("保存", "Save"), Some("CmdOrCtrl+S"))?,
+        &item("share", l("分享与协作…", "Share & Collaborate…"), Some("CmdOrCtrl+Shift+L"))?,
         &item("export_png", l("导出 PNG…", "Export PNG…"), Some("CmdOrCtrl+Shift+E"))?,
         &item("export_svg", l("导出 SVG…", "Export SVG…"), None)?,
         &item("export_pdf", l("导出 PDF…", "Export PDF…"), None)?,

@@ -3,6 +3,7 @@ import { exportToBlob, exportToSvg } from "@excalidraw/excalidraw";
 import { t, tErr } from "./i18n";
 import { basename, dirname, inTauri, ipc, isICloud } from "./ipc";
 import { DocSession } from "./session";
+import { renameCollabPath } from "./collab";
 import { isCommentLike, type El } from "./elements";
 import { getState, setState, toast, updateTab } from "./store";
 
@@ -198,6 +199,7 @@ export async function renamePath(from: string, name: string) {
       sessions.delete(p);
       s.path = n;
       sessions.set(n, s);
+      renameCollabPath(p, n);
     }
   }
   setState((st) => {

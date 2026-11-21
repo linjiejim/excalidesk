@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "Excalidesk",
+    "slug": "excalidesk",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "scheme": "excalidesk",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#f4f4f2"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.jim.excalidesk.ios",
+      "usesIcloudStorage": true,
+      "infoPlist": {
+        "CFBundleAllowMixedLocalizations": true
+      }
+    },
+    "plugins": [
+      [
+        "./plugins/withICloudExcalidraw",
+        {
+          "containerId": "iCloud.dev.jim.excalidesk",
+          "containerName": "Excalidesk"
+        }
+      ]
+    ]
+  }
+}

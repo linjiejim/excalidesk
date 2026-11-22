@@ -5,3 +5,4 @@
 | Spec | 内容 | 状态 |
 |---|---|---|
 | [20261117-presentation-mode.md](20261117-presentation-mode.md) | 演示模式：frame 当幻灯片放映、演讲者备注、导出 PDF、MCP 幻灯片参数 | done（0.7.0） |
+| [20261122-ios-viewer.md](20261122-ios-viewer.md) | iOS 预览 App：选文件夹看 `.excalidraw`，和桌面端一样的渲染（离线 Excalidraw → 矢量 PDF → PDFKit），原生手势和 Liquid Glass | confirmed（模拟器已验证，未合并） |

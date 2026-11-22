@@ -1,0 +1,67 @@
+{
+  "expo": {
+    "name": "Excalidesk",
+    "slug": "excalidesk",
+    "version": "0.1.0",
+    "orientation": "default",
+    "icon": "./assets/icon/icon.png",
+    "scheme": "excalidesk",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "dev.jim.excalidesk",
+      "supportsTablet": true,
+      "icon": "./assets/icon/icon.png",
+      "infoPlist": {
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "ITSAppUsesNonExemptEncryption": false,
+        "CFBundleDocumentTypes": [
+          {
+            "CFBundleTypeName": "Excalidraw Drawing",
+            "CFBundleTypeRole": "Viewer",
+            "LSHandlerRank": "Alternate",
+            "LSItemContentTypes": [
+              "dev.jim.excalidesk.excalidraw"
+            ]
+          }
+        ],
+        "UTImportedTypeDeclarations": [
+          {
+            "UTTypeIdentifier": "dev.jim.excalidesk.excalidraw",
+            "UTTypeDescription": "Excalidraw Drawing",
+            "UTTypeConformsTo": [
+              "public.json",
+              "public.data"
+            ],
+            "UTTypeTagSpecification": {
+              "public.filename-extension": [
+                "excalidraw"
+              ],
+              "public.mime-type": [
+                "application/vnd.excalidraw+json"
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#ffffff",
+          "dark": {
+            "backgroundColor": "#000000",
+            "image": "./assets/icon/splash-dark.png"
+          },
+          "image": "./assets/icon/splash.png",
+          "imageWidth": 88
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    }
+  }
+}

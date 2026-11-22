@@ -10,6 +10,7 @@
 - **和 Agent 协作（MCP）**：Claude Code、Codex 在图上画原型和方案，你改图或按 C 钉批注，点「发回」让它接着改；多个 Agent 可同时改不同的图
 - **演示**：每个 frame 是一页，⌥⌘P 全屏放映（方向键翻页、K 激光笔、N 看备注），演讲者备注放在页下方的备注 frame 里；导出 PDF 一页一张。Agent 可以直接画一整套幻灯片
 - **边界情况都兜住**：iCloud 冲突版本自动合并；文件在外部被删除或移走时暂停保存，不会把它写回来
+- **iPhone 预览**（`mobile/`，Expo）：选 iCloud 云盘里的文件夹就能看，渲染和桌面端一模一样，双指缩放、按页看幻灯片和备注、搜图里的文字；只看不改（[mobile/README.md](mobile/README.md)）
 - 中英双语、浅色 / 深色 / 跟随系统（设置 ⌘,）
 - 侧边栏：右键菜单、双击改名、拖动调整工作区顺序、按修改时间 / 创建时间 / 名称排序
 - 标签页、原生菜单、双击打开、PNG / SVG / PDF 导出
@@ -71,6 +72,7 @@ node scripts/site-screens.mjs      # 中 / 英 × 浅 / 深 → site/screens/，
 src/shell/        外壳 UI 与文档会话（保存调度、增量、外部修改合并）
 src/bench/        性能基准页（?bench=1）
 src-tauri/src/    Rust：文档模型与原子写、工作区扫描与 FSEvents、iCloud、菜单、120Hz、mcp/（Agent 协作）
+mobile/           iPhone 预览 App（Expo + Swift 原生模块：文件夹访问、离线渲染成 PDF、PDFKit 画布）
 bench/            基准与自测脚本、测试场景生成
 docs/             方案、P0 性能实验结果、各阶段说明
 site/             官网（GitHub Pages）

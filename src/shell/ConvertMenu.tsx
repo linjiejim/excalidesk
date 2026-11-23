@@ -135,7 +135,8 @@ export function convertKey(s: DocSession, e: React.KeyboardEvent, presenting: bo
   if (presenting || e.nativeEvent.isComposing) return false;
   if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable='true']")) return false;
   const api = s.api;
-  if (!api || api.getAppState().editingTextElement) return false;
+  const st = api?.getAppState();
+  if (!st || st.editingTextElement || st.viewModeEnabled) return false;
   const mod = e.metaKey || e.ctrlKey || e.altKey;
   const stop = () => {
     e.preventDefault();
@@ -245,7 +246,8 @@ export function onConvertChange(s: DocSession, appState: Record<string, any>) {
   if (sel === lastSel) return;
   lastSel = sel;
   const r = round;
-  if (r && r.session === s && selKey(Object.keys(sel ?? {}).filter((id) => sel[id])) !== r.expect) queueMicrotask(() => round === r && finish(liveTarget(r)));
+  // 只看我们选中的那些还在不在：在分组里转换时 Excalidraw 会把选择扩到组里其他元素，那不算用户换了选择
+  if (r && r.session === s && r.expect.split(",").some((id) => id && !sel?.[id])) queueMicrotask(() => round === r && finish(liveTarget(r)));
   notify();
 }
 export function onConvertScroll() {
@@ -257,10 +259,13 @@ export function ConvertLayer({ session, host, presenting }: { session: DocSessio
   const r = round;
   const slot = useActionsSlot(host);
   const popup = useRef<HTMLDivElement>(null);
-  const [pos, setPosRaw] = useState<{ left: number; top: number } | null>(null);
-  const setPos = (p: { left: number; top: number } | null) => setPosRaw((old) => (old?.left === p?.left && old?.top === p?.top ? old : p));
   const api = session.api;
   const mine = r && r.session === session ? r : null;
+  // 位置记在这一轮上：浮层关着时不用算，也不 setState
+  const [placed, setPlaced] = useState<{ round: Round; left: number; top: number } | null>(null);
+  const pos = placed && placed.round === mine ? placed : null;
+  const setPos = (p: { left: number; top: number } | null) =>
+    setPlaced((old) => (!p || !mine ? null : old && old.round === mine && old.left === p.left && old.top === p.top ? old : { round: mine, ...p }));
 
   // 换标签（Editor 重新挂载）或进放映时收起
   useEffect(() => () => void (round?.session === session && finish(liveTarget(round))), [session]);
@@ -283,7 +288,7 @@ export function ConvertLayer({ session, host, presenting }: { session: DocSessio
   const root = host?.querySelector<HTMLElement>(".excalidraw") ?? null;
   // 浮层位置：Tab 打开的在选区左下方（和上游一样），按钮打开的在按钮右边
   useLayoutEffect(() => {
-    if (!mine || !root || !api) return setPos(null);
+    if (!mine || !root || !api) return;
     const box = root.getBoundingClientRect();
     const w = popup.current?.offsetWidth ?? 160, h = popup.current?.offsetHeight ?? 44;
     let left: number, top: number;

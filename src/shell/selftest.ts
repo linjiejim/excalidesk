@@ -1,6 +1,6 @@
 // 端到端自测（--selftest）：在临时工作区里把主路径和边界情况都走一遍，结果写到结果目录后退出。
 // 移到废纸篓和 iCloud 冲突不在这里测：前者会动到真实的废纸篓，后者需要两台设备。
-import { CaptureUpdateAction, convertToExcalidrawElements } from "@excalidraw/excalidraw";
+import { CaptureUpdateAction, convertToExcalidrawElements, restoreElements } from "@excalidraw/excalidraw";
 import { activate, addRoot, closeTab, duplicatePath, exportActive, moveRoot, newDoc, newFolder, openPath, removeRoot, renamePath, sessions } from "./actions";
 import { t } from "./i18n";
 import { sortTree } from "./Shell";
@@ -454,6 +454,13 @@ export async function runSelftest() {
       return c.type === "ellipse" ? dx * dx + dy * dy <= 1.001 : c.type === "diamond" ? dx + dy <= 1.001 : dx <= 1.001 && dy <= 1.001;
     });
   };
+  /** 撤销转换后：删掉的容器不再登记这段文字，重新打开（restoreElements 修绑定）时文字也不会被绑回去 */
+  const cleanAfterUndo = (textId: string, containerId: string) => {
+    const c = get(containerId);
+    if (c && c.boundElements?.some((b: any) => b.id === textId)) throw new Error(`删掉的容器还登记着文字 ${JSON.stringify(c.boundElements)}`);
+    const reopened = (restoreElements(sapi().getSceneElementsIncludingDeleted(), null, { repairBindings: true }) as any[]).find((e) => e.id === textId);
+    if (reopened?.containerId) throw new Error(`重新打开后文字被绑回 ${reopened.containerId}`);
+  };
   /** 箭头末端到连着的元素轮廓的距离（沿最后一段的方向） */
   const endGap = (a: any, target: any) => {
     const [px, py] = a.points.at(-2), [ex, ey] = a.points.at(-1);
@@ -495,6 +502,7 @@ export async function runSelftest() {
     undo();
     await sleep(150);
     if (get("cv-list").containerId || !get(c.id).isDeleted) throw new Error("⌘Z 没回到原样");
+    cleanAfterUndo("cv-list", c.id);
     return { container: [c.width, c.height], lines: t.text.split("\n").length };
   });
 
@@ -598,9 +606,11 @@ export async function runSelftest() {
     hk("Escape", "Escape");
     await sleep(120);
     if (popup() || kind() !== "rectangle") throw new Error(`Esc 后 ${!!popup()} ${kind()}`);
+    const made = get("cv-word").containerId;
     undo();
     await sleep(150);
     if (kind() !== "text") throw new Error(`一次 ⌘Z 后是 ${kind()}`);
+    cleanAfterUndo("cv-word", made);
     return seen;
   });
 
@@ -636,6 +646,64 @@ export async function runSelftest() {
     hk("Escape", "Escape", {}, ta);
     await waitFor(() => !sapi().getAppState().editingTextElement, 3000);
     if (bad) throw new Error("编辑文字时触发了转换");
+    return "ok";
+  });
+
+  await step("转换形状：选着的箭头还选着；再点按钮收起保留结果；浮层开着时别人改了就作废", async () => {
+    await pick("cv-empty", "cv-arrow");
+    hk("D", "KeyD", { shiftKey: true });
+    await sleep(120);
+    const sel = sapi().getAppState().selectedElementIds;
+    if (get("cv-empty").type !== "diamond" || !sel["cv-arrow"] || !sel["cv-empty"]) throw new Error(`选择 ${Object.keys(sel)}`);
+    undo();
+    await sleep(150);
+    await pick("cv-empty");
+    const trig = await waitFor(() => document.querySelector<HTMLButtonElement>(".xd-convert-trigger"), 3000);
+    trig!.click();
+    await waitFor(() => popup(), 2000);
+    hk("Tab", "Tab");
+    await sleep(100);
+    document.querySelector<HTMLButtonElement>(".xd-convert-trigger")!.click();
+    await sleep(120);
+    if (popup() || get("cv-empty").type !== "diamond") throw new Error(`再点按钮后 ${!!popup()} ${get("cv-empty").type}`);
+    undo();
+    await sleep(150);
+    if (get("cv-empty").type !== "rectangle") throw new Error("没撤销回去");
+    // Tab 切过之后点按钮：先收起 Tab 这一轮（保留结果），再打开按钮的浮层
+    await pick("cv-empty");
+    hk("Tab", "Tab");
+    await sleep(80);
+    hk("Tab", "Tab");
+    await sleep(100);
+    document.querySelector<HTMLButtonElement>(".xd-convert-trigger")!.click();
+    await sleep(150);
+    if (!popup() || get("cv-empty").type !== "diamond") throw new Error(`Tab 后点按钮 ${!!popup()} ${get("cv-empty").type}`);
+    hk("Escape", "Escape");
+    await sleep(100);
+    undo();
+    await sleep(150);
+    if (get("cv-empty").type !== "rectangle") throw new Error("Tab 后点按钮：没撤销回去");
+    // 别人（这里模拟 Agent）在循环中改了文字：浮层收起，别人的修改留着，不被开始前的快照盖回去
+    await pick("cv-word");
+    hk("Tab", "Tab");
+    await sleep(80);
+    hk("Tab", "Tab");
+    await sleep(100);
+    if (!popup() || !get("cv-word").containerId) throw new Error("浮层没开着 / 没切到矩形");
+    sapi().updateScene({
+      elements: (sapi().getSceneElementsIncludingDeleted() as any[]).map((e) => (e.id === "cv-word" ? { ...e, strokeColor: "#e03131", version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)),
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+    await sleep(150);
+    const closed = !popup();
+    hk("Escape", "Escape");
+    await sleep(120);
+    if (!closed || get("cv-word").strokeColor !== "#e03131") throw new Error(`别人的修改 ${closed} ${get("cv-word").strokeColor}`);
+    // 收尾：cv-word 回到独立文本，后面的多选步骤还要用它测文本 → 形状
+    await pick("cv-word");
+    hk("T", "KeyT", { shiftKey: true });
+    await sleep(120);
+    if (get("cv-word").containerId) throw new Error("收尾：cv-word 没回到文本");
     return "ok";
   });
 

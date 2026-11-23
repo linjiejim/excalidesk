@@ -1,11 +1,12 @@
 // 当前标签的 Excalidraw 实例。按会话 uid 作 key：切标签 = 重新挂载，重命名不会（一个窗口只有一个画布实例）。
 // props 只有 session、theme、lang，外壳其他状态变化不会让它重渲染。
-import { memo, useCallback, useEffect, useMemo } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { Excalidraw, MainMenu } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import type { DocSession } from "./session";
 import { exportActive, toggleHistory } from "./actions";
 import { startComment } from "./agent";
+import { ConvertLayer, convertKey, onConvertChange, onConvertScroll } from "./ConvertMenu";
 import { t } from "./i18n";
 import { exportPdf } from "./pdf";
 import { togglePresentation } from "./present";
@@ -19,10 +20,26 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
   const initialData = useMemo(() => session.initialData(), [session]);
   const onApi = useCallback((api: unknown) => session.attach(api), [session]);
   useEffect(() => () => session.attach(null), [session]);
-  // C：给选中的元素加批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按不冲突）
+  const [host, setHost] = useState<HTMLDivElement | null>(null);
+  const onChange = useCallback(
+    (elements: any, appState: any, files: any) => {
+      session.onChange(elements, appState, files);
+      onConvertChange(session, appState);
+    },
+    [session],
+  );
+  const onScroll = useCallback(
+    (x: number, y: number, zoom: any) => {
+      session.onScroll(x, y, zoom);
+      onConvertScroll();
+    },
+    [session],
+  );
+  // Tab / ⇧Tab / ⇧R ⇧D ⇧O ⇧T：转换形状（ConvertMenu.tsx）。C：给选中的元素加批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按不冲突）
   const onKey = useCallback(
     (e: React.KeyboardEvent) => {
       session.userInput();
+      if (convertKey(session, e, presenting)) return;
       if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || e.nativeEvent.isComposing) return;
       if (e.code !== "KeyC" && e.key.toLowerCase() !== "c") return;
       if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable='true']")) return;
@@ -31,17 +48,17 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
       e.stopPropagation();
       startComment(session);
     },
-    [session],
+    [session, presenting],
   );
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
-    <div className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
+    <div ref={setHost} className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}
         excalidrawAPI={onApi}
-        onChange={session.onChange as any}
-        onScrollChange={session.onScroll as any}
+        onChange={onChange}
+        onScrollChange={onScroll}
         theme={theme}
         // 放映时不画网格：用 prop 盖住，不改 state（gridModeEnabled 会存进文件）
         gridModeEnabled={presenting ? false : undefined}
@@ -64,6 +81,7 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
           <MainMenu.DefaultItems.Help />
         </MainMenu>
       </Excalidraw>
+      <ConvertLayer session={session} host={host} presenting={presenting} />
     </div>
   );
 }

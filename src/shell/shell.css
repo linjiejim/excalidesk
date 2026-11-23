@@ -216,3 +216,13 @@ html:not([data-laser]) .shell.presenting .excalidraw canvas.interactive { cursor
 @keyframes present-hud { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
 .present-notes { position: fixed; z-index: 21; left: 50%; bottom: 24px; transform: translateX(-50%); width: min(960px, calc(100vw - 48px)); max-height: 35vh; overflow: auto; padding: 16px 20px; border-radius: 12px; background: rgba(24, 24, 27, .9); color: #f1f3f5; font-size: 18px; line-height: 1.55; white-space: pre-wrap; box-shadow: 0 8px 32px rgba(0, 0, 0, .4); }
 .present-notes .muted { color: #adb5bd; }
+
+/* 转换形状（ConvertMenu.tsx）：浮层 portal 进 .excalidraw，用 Excalidraw 自己的主题变量 */
+.excalidraw .xd-convert { position: absolute; z-index: var(--zIndex-layerUI, 4); display: flex; gap: 2px; padding: 4px; border-radius: var(--border-radius-lg, 8px); background: var(--island-bg-color, #fff); box-shadow: var(--shadow-island); }
+.excalidraw .xd-convert__item { display: flex; align-items: center; justify-content: center; width: var(--default-button-size, 2rem); height: var(--default-button-size, 2rem); padding: 0; border: none; border-radius: var(--border-radius-md, 6px); background: transparent; color: var(--icon-fill-color); cursor: pointer; }
+.excalidraw .xd-convert__item svg { width: 1.125rem; height: 1.125rem; }
+.excalidraw .xd-convert__item:hover:not(:disabled) { background: var(--color-surface-high); }
+.excalidraw .xd-convert__item[aria-pressed="true"] { background: var(--color-surface-primary-container); color: var(--color-on-primary-container); }
+.excalidraw .xd-convert__item:disabled { opacity: .3; cursor: default; }
+.excalidraw .xd-convert-slot { display: contents; }
+.shell.presenting .excalidraw .xd-convert { display: none; }

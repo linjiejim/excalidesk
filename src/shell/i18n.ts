@@ -72,6 +72,8 @@ const zh = {
   "slides.name": "第 {n} 页", "slides.notesName": "备注", "slides.notesPlaceholder": "演讲者备注", "slides.pickFirst": "先选中一页（或把它挪到画面中间）",
   "present.none": "没有可演示的页面。用「演示 → 新建一页」，或按 F 画一个 frame。", "present.noNotes": "这一页没有备注",
   "present.menu": "演示", "present.fromStart": "从第一页开始演示", "present.newSlide": "新建一页", "present.addNotes": "添加演讲者备注", "present.exportPdf": "导出 PDF…",
+  // 转换形状
+  "convert.title": "转换形状", "convert.trigger": "转换形状 — Tab", "convert.rectangle": "矩形", "convert.diamond": "菱形", "convert.ellipse": "椭圆", "convert.text": "文本",
   "pdf.progress": "正在导出 PDF（{i}/{n}）…", "pdf.empty": "图是空的，没有可导出的内容", "pdf.failed": "导出 PDF 失败：{error}",
   // Rust 错误
   "err.no_icloud": "这台 Mac 没有开启 iCloud Drive", "err.name_invalid": "名字不能为空，也不能包含 / 或 :，不能以 . 开头", "err.exists": "「{0}」已经存在",
@@ -134,6 +136,8 @@ const en: typeof zh = {
   "slides.name": "Slide {n}", "slides.notesName": "Notes", "slides.notesPlaceholder": "Speaker notes", "slides.pickFirst": "Select a slide first (or bring it to the middle of the screen)",
   "present.none": "Nothing to present. Use Present → New Slide, or press F to draw a frame.", "present.noNotes": "No notes for this slide",
   "present.menu": "Present", "present.fromStart": "Present from First Slide", "present.newSlide": "New Slide", "present.addNotes": "Add Speaker Notes", "present.exportPdf": "Export PDF…",
+  // Convert shape
+  "convert.title": "Convert shape", "convert.trigger": "Convert shape — Tab", "convert.rectangle": "Rectangle", "convert.diamond": "Diamond", "convert.ellipse": "Ellipse", "convert.text": "Text",
   "pdf.progress": "Exporting PDF ({i}/{n})…", "pdf.empty": "The drawing is empty; nothing to export", "pdf.failed": "Couldn't export PDF: {error}",
   "err.no_icloud": "iCloud Drive isn't turned on on this Mac", "err.name_invalid": "Names can't be empty, contain / or :, or start with a dot", "err.exists": "“{0}” already exists",
   "err.no_parent": "No parent folder", "err.invalid_file": "Not a valid .excalidraw file: {0}", "err.not_open": "Document isn't open", "err.trash_failed": "Couldn't move to Trash", "err.reorder": "Workspaces changed — try again",

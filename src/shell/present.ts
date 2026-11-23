@@ -257,14 +257,24 @@ export function stopPresentation() {
   document.documentElement.removeAttribute("data-laser");
   if (c.s.api === c.api) {
     // 先退出只读模式，再换回原来的工具（只读模式下有些工具换不进去）。
-    // 只读模式一切换，Excalidraw 会在 componentDidUpdate 里清空选择，所以选择晚一帧再放回去
+    // 只读模式一切换，Excalidraw 会在 componentDidUpdate 里先排队清空选择（deselectElements）、再调 onChange。
+    // 所以在 viewModeEnabled 变回原值的那次 onChange 里放回选择，正好排在清空后面。
+    // 不用「等一帧」：退出全屏的过渡里可能好几帧不出画面；React 还没提交时放回去，又会被同一次渲染清掉
     const { selectedElementIds, selectedGroupIds, ...rest } = c.saved;
-    c.api.updateScene({ appState: rest, captureUpdate: CaptureUpdateAction.NEVER });
+    const api = c.api;
+    let pending = true;
+    const putBack = () => {
+      if (!pending) return;
+      pending = false;
+      off();
+      clearTimeout(timer);
+      if (c.s.api === api) api.updateScene({ appState: { selectedElementIds, selectedGroupIds }, captureUpdate: CaptureUpdateAction.NEVER });
+    };
+    const off = api.onChange((_els: unknown, st: any) => st.viewModeEnabled === !!rest.viewModeEnabled && putBack());
+    const timer = setTimeout(putBack, 1000);
+    api.updateScene({ appState: rest, captureUpdate: CaptureUpdateAction.NEVER });
     const tool = c.tool;
-    c.api.setActiveTool(tool.type === "custom" ? { type: "custom", customType: tool.customType } : { type: tool.type });
-    requestAnimationFrame(() => {
-      if (c.s.api === c.api) c.api.updateScene({ appState: { selectedElementIds, selectedGroupIds }, captureUpdate: CaptureUpdateAction.NEVER });
-    });
+    api.setActiveTool(tool.type === "custom" ? { type: "custom", customType: tool.customType } : { type: tool.type });
   }
   // 放映中被切走、关掉时已经按放映前的镜头记过视口；这里再记一次，然后恢复正常记录
   c.s.saveViewport();

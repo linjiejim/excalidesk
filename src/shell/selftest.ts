@@ -9,6 +9,7 @@ import { getState, setState, updateSettings } from "./store";
 import { startPresentation } from "./present";
 import { exportPdf, renderPdf } from "./pdf";
 import { addNotes, buildFrame, newSlide, slidesOf } from "./slides";
+import { hitOutline } from "./convert";
 
 type Step = { name: string; ok: boolean; ms: number; detail?: unknown };
 
@@ -429,6 +430,227 @@ export async function runSelftest() {
     const written = await ipc.debugSize(target);
     if (written < 1000) throw new Error(`写盘只有 ${written} 字节`);
     return { pages, bytes: bytes.length };
+  });
+
+  // 转换形状（docs/specs/20261123-convert-shapes.md）：按键发给 .excalidraw，和用户在画布上按一样先经过 Editor 的 onKeyDownCapture
+  const shapes = `${dir}/形状转换.excalidraw`;
+  const hk = (k: string, code: string, mods: KeyboardEventInit = {}, target?: Element | null) =>
+    (target ?? document.querySelector(".excalidraw"))!.dispatchEvent(new KeyboardEvent("keydown", { key: k, code, bubbles: true, cancelable: true, ...mods }));
+  const undo = () => hk("z", "KeyZ", { metaKey: true });
+  const sapi = () => session(shapes).api;
+  const pick = async (...ids: string[]) => {
+    sapi().updateScene({ appState: { selectedElementIds: Object.fromEntries(ids.map((i) => [i, true])) }, captureUpdate: CaptureUpdateAction.NEVER });
+    await sleep(80);
+  };
+  const get = (id: string) => (sapi().getSceneElementsIncludingDeleted() as any[]).find((e) => e.id === id);
+  const labelOf = (c: any) => get(c.boundElements.find((b: any) => b.type === "text").id);
+  const popup = () => document.querySelector(".xd-convert");
+  const listText = "机器\n\nJim Pro\n- 个人工作站\n\nJimmyhome\n- 个人项目\n- 个人 agent";
+  /** 文字框四个角都在形状里面（矩形按外框，菱形 / 椭圆按轮廓） */
+  const inside = (t: any, c: any) => {
+    const a = c.width / 2, b = c.height / 2, cx = c.x + a, cy = c.y + b;
+    return [[t.x, t.y], [t.x + t.width, t.y], [t.x, t.y + t.height], [t.x + t.width, t.y + t.height]].every(([x, y]) => {
+      const dx = Math.abs(x - cx) / a, dy = Math.abs(y - cy) / b;
+      return c.type === "ellipse" ? dx * dx + dy * dy <= 1.001 : c.type === "diamond" ? dx + dy <= 1.001 : dx <= 1.001 && dy <= 1.001;
+    });
+  };
+  /** 箭头末端到连着的元素轮廓的距离（沿最后一段的方向） */
+  const endGap = (a: any, target: any) => {
+    const [px, py] = a.points.at(-2), [ex, ey] = a.points.at(-1);
+    const len = Math.hypot(ex - px, ey - py);
+    return hitOutline(target, { x: a.x + ex, y: a.y + ey }, { x: (ex - px) / len, y: (ey - py) / len });
+  };
+
+  await step("转换形状：准备", async () => {
+    const els = convertToExcalidrawElements([
+      { type: "text", id: "cv-list", x: 0, y: 0, text: listText, fontSize: 20, textAlign: "left" },
+      { type: "rectangle", id: "cv-box", x: 400, y: 0, width: 200, height: 70, label: { text: "一段比较长的标签文字 long label" } },
+      { type: "arrow", id: "cv-arrow", x: 760, y: 220, points: [[0, 0], [-170, -160]], end: { id: "cv-box" } },
+      { type: "rectangle", id: "cv-empty", x: 400, y: 300, width: 140, height: 80 },
+      { type: "text", id: "cv-word", x: 0, y: 320, text: "single", fontSize: 20 },
+      { type: "arrow", id: "cv-arrow2", x: 200, y: 420, points: [[0, 0], [-120, -80]], end: { id: "cv-word" } },
+      { type: "text", id: "cv-edit", x: 0, y: 520, text: "edit me", fontSize: 20 },
+    ] as any, { regenerateIds: false });
+    await write(shapes, { type: "excalidraw", version: 2, elements: els, appState: {}, files: {} });
+    await openPath(shapes);
+    await waitFor(() => ready(shapes));
+    await sleep(600);
+    session(shapes).userInput();
+    if (get("cv-arrow")?.endBinding?.elementId !== "cv-box" || get("cv-arrow2")?.endBinding?.elementId !== "cv-word") throw new Error("箭头没连上");
+    return els.length;
+  });
+
+  await step("转换形状：文本 ⇧R → 矩形，保留左对齐、不多换行、id 不变，⌘Z 一步撤销", async () => {
+    const t0 = get("cv-list");
+    await pick("cv-list");
+    hk("R", "KeyR", { shiftKey: true });
+    await sleep(120);
+    const t = get("cv-list"), c = t.containerId && get(t.containerId);
+    if (!c || c.type !== "rectangle" || c.isDeleted) throw new Error(`没有矩形 ${JSON.stringify([t.containerId, c?.type])}`);
+    if (t.textAlign !== "left" || t.fontSize !== t0.fontSize) throw new Error(`对齐 / 字号变了 ${t.textAlign} ${t.fontSize}`);
+    if (t.text.split("\n").length !== listText.split("\n").length) throw new Error(`多了换行 ${JSON.stringify(t.text)}`);
+    if (Math.abs(t.x - t0.x) > 0.5 || Math.abs(t.y - t0.y) > 0.5) throw new Error(`文字挪了 ${[t0.x, t0.y]} → ${[t.x, t.y]}`);
+    if (!inside(t, c)) throw new Error("文字跑到矩形外面");
+    if (!sapi().getAppState().selectedElementIds[c.id]) throw new Error("没选中新矩形");
+    undo();
+    await sleep(150);
+    if (get("cv-list").containerId || !get(c.id).isDeleted) throw new Error("⌘Z 没回到原样");
+    return { container: [c.width, c.height], lines: t.text.split("\n").length };
+  });
+
+  await step("转换形状：文本 ⇧D / ⇧O → 菱形 / 椭圆，文字完整地在里面", async () => {
+    const out: Record<string, number[]> = {};
+    for (const [type, code] of [["diamond", "KeyD"], ["ellipse", "KeyO"]]) {
+      await pick("cv-list");
+      hk(code.slice(3), code, { shiftKey: true });
+      await sleep(120);
+      const t = get("cv-list"), c = t.containerId && get(t.containerId);
+      if (!c || c.type !== type) throw new Error(`没有${type} ${c?.type}`);
+      if (t.text.split("\n").length !== listText.split("\n").length || !inside(t, c)) throw new Error(`${type} 里的文字 ${JSON.stringify(t.text)} ${[t.x, t.y, t.width, t.height]} / ${[c.x, c.y, c.width, c.height]}`);
+      out[type] = [c.width, c.height];
+      undo();
+      await sleep(150);
+      if (get("cv-list").containerId) throw new Error(`${type} 没撤销回去`);
+    }
+    return out;
+  });
+
+  await step("转换形状：带文字的矩形 ⇧D → 菱形，同一个 id、x / y / 宽不变，放不下撑高、字号不变", async () => {
+    const b0 = get("cv-box"), l0 = labelOf(b0);
+    await pick("cv-box");
+    hk("D", "KeyD", { shiftKey: true });
+    await sleep(120);
+    const b = get("cv-box"), l = labelOf(b);
+    if (b.type !== "diamond" || b.x !== b0.x || b.y !== b0.y || b.width !== b0.width) throw new Error(`菱形 ${JSON.stringify([b.type, b.x, b.y, b.width])}`);
+    if (!(b.height > b0.height)) throw new Error(`没撑高 ${b0.height} → ${b.height}`);
+    if (l.id !== l0.id || l.fontSize !== l0.fontSize || l.containerId !== b.id || !inside(l, b)) throw new Error(`标签 ${JSON.stringify([l.fontSize, l.containerId, l.x, l.y, l.width, l.height])}`);
+    undo();
+    await sleep(150);
+    if (get("cv-box").type !== "rectangle" || get("cv-box").height !== b0.height) throw new Error("没撤销回去");
+    return { height: [b0.height, b.height] };
+  });
+
+  await step("转换形状：箭头跟着走（矩形 → 椭圆贴着新轮廓；文本 → 形状改连容器）", async () => {
+    await pick("cv-box");
+    hk("O", "KeyO", { shiftKey: true });
+    await sleep(120);
+    const a = get("cv-arrow"), b = get("cv-box");
+    const gap = a.endBinding?.gap ?? 5, d = endGap(a, b);
+    if (b.type !== "ellipse" || a.endBinding?.elementId !== "cv-box") throw new Error(`绑定 ${a.endBinding?.elementId} ${b.type}`);
+    if (d === null || Math.abs(d - gap) > 2) throw new Error(`端点离椭圆 ${d}，gap ${gap}`);
+    undo();
+    await sleep(150);
+    await pick("cv-word");
+    hk("R", "KeyR", { shiftKey: true });
+    await sleep(120);
+    const w = get("cv-word"), c = get(w.containerId), a2 = get("cv-arrow2");
+    if (a2.endBinding?.elementId !== c.id || !c.boundElements.some((x: any) => x.id === "cv-arrow2")) throw new Error(`没改连容器 ${a2.endBinding?.elementId}`);
+    const d2 = endGap(a2, c);
+    if (d2 === null || Math.abs(d2 - (a2.endBinding.gap ?? 5)) > 2) throw new Error(`端点离容器 ${d2}`);
+    undo();
+    await sleep(150);
+    if (get("cv-arrow2").endBinding?.elementId !== "cv-word") throw new Error("撤销后没连回文字");
+    return { ellipse: d, container: d2 };
+  });
+
+  await step("转换形状：带文字的形状 ⇧T → 文本；没有文字的形状 ⇧T 不变、浮层里「文本」是灰的", async () => {
+    const l0 = labelOf(get("cv-box"));
+    await pick("cv-box");
+    hk("T", "KeyT", { shiftKey: true });
+    await sleep(120);
+    const l = get(l0.id), a = get("cv-arrow");
+    if (!get("cv-box").isDeleted || l.containerId || l.text !== l0.originalText) throw new Error(`文本 ${JSON.stringify([get("cv-box").isDeleted, l.containerId, l.text])}`);
+    if (l.y !== l0.y || Math.abs(l.x + l.width / 2 - (l0.x + l0.width / 2)) > 0.5) throw new Error("居中的文字没留在原位");
+    if (a.endBinding?.elementId !== l.id) throw new Error(`箭头没改连文字 ${a.endBinding?.elementId}`);
+    undo();
+    await sleep(150);
+    if (get("cv-box").isDeleted || get(l0.id).containerId !== "cv-box") throw new Error("没撤销回去");
+    const v = get("cv-empty").version;
+    await pick("cv-empty");
+    hk("T", "KeyT", { shiftKey: true });
+    await sleep(100);
+    if (get("cv-empty").version !== v) throw new Error("没文字的形状被改了");
+    hk("Tab", "Tab");
+    await waitFor(() => popup(), 2000);
+    const disabled = document.querySelector<HTMLButtonElement>('.xd-convert__item[data-target="text"]')?.disabled;
+    hk("Escape", "Escape");
+    await sleep(100);
+    if (!disabled || popup()) throw new Error(`文本项 disabled=${disabled}`);
+    return "ok";
+  });
+
+  await step("转换形状：Tab 弹出不改图，Tab 下一种、⇧Tab 上一种，Esc 保留，整轮一步撤销", async () => {
+    await pick("cv-word");
+    const kind = () => {
+      const w = get("cv-word");
+      return w.containerId ? get(w.containerId).type : "text";
+    };
+    const seen: string[] = [];
+    hk("Tab", "Tab");
+    await sleep(100);
+    if (!popup() || kind() !== "text") throw new Error(`第一下 Tab ${!!popup()} ${kind()}`);
+    for (const shift of [false, false, true]) {
+      hk("Tab", "Tab", { shiftKey: shift });
+      await sleep(100);
+      seen.push(kind());
+    }
+    if (seen.join() !== "rectangle,diamond,rectangle") throw new Error(`循环 ${seen}`);
+    hk("Escape", "Escape");
+    await sleep(120);
+    if (popup() || kind() !== "rectangle") throw new Error(`Esc 后 ${!!popup()} ${kind()}`);
+    undo();
+    await sleep(150);
+    if (kind() !== "text") throw new Error(`一次 ⌘Z 后是 ${kind()}`);
+    return seen;
+  });
+
+  await step("转换形状：Actions 栏按钮；只选箭头时没有按钮，Tab、⇧R 不改图", async () => {
+    await pick("cv-empty");
+    const trig = await waitFor(() => document.querySelector<HTMLButtonElement>(".selected-shape-actions fieldset .xd-convert-trigger"), 3000);
+    trig!.click();
+    await waitFor(() => popup(), 2000);
+    document.querySelector<HTMLButtonElement>('.xd-convert__item[data-target="ellipse"]')!.click();
+    await sleep(120);
+    if (get("cv-empty").type !== "ellipse" || popup()) throw new Error(`按钮转换 ${get("cv-empty").type}`);
+    undo();
+    await sleep(150);
+    const v = get("cv-arrow").version;
+    await pick("cv-arrow");
+    await sleep(150);
+    if (document.querySelector(".xd-convert-trigger")) throw new Error("只选箭头时还有按钮");
+    hk("Tab", "Tab");
+    hk("R", "KeyR", { shiftKey: true });
+    await sleep(100);
+    if (popup() || get("cv-arrow").version !== v || get("cv-arrow").type !== "arrow") throw new Error("箭头被转换了");
+    return "ok";
+  });
+
+  await step("转换形状：编辑文字时 Tab、⇧R 是正常输入", async () => {
+    await pick("cv-edit");
+    hk("Enter", "Enter");
+    const ta = await waitFor(() => document.querySelector<HTMLTextAreaElement>("textarea.excalidraw-wysiwyg"), 3000);
+    hk("R", "KeyR", { shiftKey: true }, ta);
+    hk("Tab", "Tab", {}, ta);
+    await sleep(100);
+    const bad = popup() || get("cv-edit").containerId;
+    hk("Escape", "Escape", {}, ta);
+    await waitFor(() => !sapi().getAppState().editingTextElement, 3000);
+    if (bad) throw new Error("编辑文字时触发了转换");
+    return "ok";
+  });
+
+  await step("转换形状：多选文本和矩形 ⇧O 都变椭圆；存盘合法", async () => {
+    await pick("cv-word", "cv-empty");
+    hk("O", "KeyO", { shiftKey: true });
+    await sleep(120);
+    const w = get("cv-word");
+    if (!w.containerId || get(w.containerId).type !== "ellipse" || get("cv-empty").type !== "ellipse") throw new Error(`多选 ${w.containerId && get(w.containerId).type} ${get("cv-empty").type}`);
+    await waitFor(() => tabOf(shapes)?.save === "saved", 8000);
+    const d = JSON.parse(await ipc.debugRead(shapes));
+    const idx = (d.elements as any[]).map((e) => e.index);
+    if (idx.some((i) => !i) || [...idx].sort().join() !== idx.join()) throw new Error("元素没按 index 排序");
+    if (!(d.elements as any[]).find((e) => e.id === "cv-word")?.containerId) throw new Error("存盘里文字没进容器");
+    return { elements: d.elements.length };
   });
 
   await step("保存出的文件是合法的 .excalidraw", async () => {

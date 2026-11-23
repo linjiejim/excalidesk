@@ -1,0 +1,33 @@
+name: PR assets inbox
+
+# scripts/pr-assets.mjs stores PR screenshots on refs/pr-assets/pr-<N>, outside refs/heads, so git clone
+# never fetches them. Where that push is refused (Claude cloud sessions only let refs/heads/* through), the
+# script pushes a branch pr-assets-inbox/<N>-<random> instead, and this job moves the assets onto
+# refs/pr-assets/pr-<N> and deletes the branch. The links the script printed are pinned to the asset
+# commit's SHA, so they work before, during and after the move.
+#
+# A push runs the workflow file from the pushed commit, so the branch tip is a carrier merge: its tree is
+# the default branch's (this file and the script are in it), its second parent is the asset commit. Only
+# that second parent ends up under refs/pr-assets; the carrier goes away with the branch.
+on:
+  push:
+    branches: ["pr-assets-inbox/**"]
+
+permissions:
+  contents: write
+
+jobs:
+  absorb:
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Move the assets to refs/pr-assets and delete the branch
+        env:
+          BRANCH: ${{ github.ref_name }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: node scripts/pr-assets.mjs --absorb "$BRANCH"

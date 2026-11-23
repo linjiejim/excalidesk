@@ -66,6 +66,21 @@ node scripts/site-screens.mjs      # 中 / 英 × 浅 / 深 → site/screens/，
 
 需要 Node 22+（脚本用 Node 自带的 WebSocket）、Google Chrome 和 `cwebp`（`brew install webp`）。
 
+### PR 里的截图和录屏
+
+```bash
+node scripts/pr-assets.mjs 12 light.png dark.png demo.mp4   # 12 是 PR 号；还没开 PR 就写 draft
+```
+
+脚本把文件提交到本仓库的 `refs/pr-assets/pr-12`，在标准输出打印一段 markdown，直接贴进 PR 描述的「效果」部分：竖图 240 宽每行三张，横图 460 宽每行两张，文件名当图注。链接钉在提交 SHA 上，之后再传也不会失效。
+
+- 这个 ref 不在 `refs/heads` 下，`git clone`、`git fetch` 默认都不拉，仓库不会因为截图变大（`git clone --mirror` 会拉）。工作区和暂存区不受影响。
+- 支持 png / jpg / webp / gif / mp4 / mov，单个文件不超过 50 MB。视频会用 ffmpeg 转成 GIF 内嵌（`brew install ffmpeg`），另附原片链接；没装 ffmpeg 就只有链接。
+- **传上去就永久公开**：任何人拿到链接都能打开，旧的 ref 不清理，删掉也不保证马上打不开。截图里不能有真实用户的数据、密钥、token、本机路径。
+- 要有本仓库的推送权限。从 fork 提 PR 的外部贡献者用不了，照旧把图拖进 GitHub 网页的输入框就行。
+- Claude 云端会话只能推 `refs/heads/*`：脚本被拒后会自动改推临时分支 `pr-assets-inbox/<PR号>-<随机>`，[PR assets inbox](.github/workflows/pr-assets-inbox.yml) 工作流把素材搬进 `refs/pr-assets/pr-<PR号>`，再删掉这个分支。打印出的链接推上去就能用，搬完以后也一直能用。
+- 想看一个 PR 传过哪些文件：`git fetch origin refs/pr-assets/pr-12 && git ls-tree -r --name-only FETCH_HEAD`。
+
 ## 目录
 
 ```

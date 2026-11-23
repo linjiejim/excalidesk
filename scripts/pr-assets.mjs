@@ -63,12 +63,16 @@ function git(args, { input, env, ok = false } = {}) {
 
 const sleep = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
-/** 没配 user.email 时 git 会拿主机名拼一个身份，别把它写进公开仓库。 */
+/** 没配 user.email 时 git 会拿主机名拼一个身份，别把它写进公开仓库：作者、提交者缺哪个补哪个。 */
 function identityEnv() {
-  if (process.env.GIT_COMMITTER_EMAIL || git(["config", "user.email"], { ok: true }).out) return {};
-  const name = "pr-assets";
-  const email = "pr-assets@users.noreply.github.com";
-  return { GIT_AUTHOR_NAME: name, GIT_AUTHOR_EMAIL: email, GIT_COMMITTER_NAME: name, GIT_COMMITTER_EMAIL: email };
+  if (git(["config", "user.email"], { ok: true }).out) return {};
+  const env = {};
+  for (const who of ["AUTHOR", "COMMITTER"])
+    if (!process.env[`GIT_${who}_EMAIL`]) {
+      env[`GIT_${who}_NAME`] = "pr-assets";
+      env[`GIT_${who}_EMAIL`] = "pr-assets@users.noreply.github.com";
+    }
+  return env;
 }
 
 /** 远端 ref 的当前 SHA；不存在返回 null。 */
@@ -108,20 +112,20 @@ function commitTree({ base, entries, parents, message, env }) {
 
 /**
  * 推一个 ref。lease 为 undefined 时不带 --force-with-lease；为 null 表示「远端不能已有这个 ref」。
- * 失败时分两种：conflict = 别人先改了这个 ref（客户端的 stale info，或服务端加锁时才发现的
- * 「failed to update ref」，所以以重读 tip 为准），重试；否则是推不上去（比如代理不放行），换路。
+ * 失败后只看重读到的 tip，不看报错文字（客户端报 stale info、服务端加锁时报 failed to update ref，
+ * 代理在推送用的 ref 列表里藏掉 ref 时也会报 stale info）：tip 就是 src → 其实推上去了；
+ * tip 变了 → conflict，别人先改了，重试；tip 没变 → 推不上去（比如代理不放行），换路。
  */
 function pushRef(remote, src, dst, lease) {
   const args = ["push", "--porcelain", "--no-follow-tags"];
   if (lease !== undefined) args.push(`--force-with-lease=${dst}:${lease ?? ""}`);
   const r = git([...args, remote, `${src}:${dst}`], { ok: true });
   const line = r.out.split("\n").find((l) => l.split("\t")[1]?.endsWith(`:${dst}`));
-  const err = [r.out, r.err].filter(Boolean).join("\n");
   if (r.status === 0 && line && line[0] !== "!") return { ok: true };
-  const conflict =
-    lease !== undefined &&
-    (/stale info|non-fast-forward|fetch first/.test(line ?? "") || remoteTip(remote, dst) !== lease);
-  return { ok: false, conflict, err };
+  const now = remoteTip(remote, dst);
+  if (now === src) return { ok: true };
+  const err = [r.out, r.err].filter(Boolean).join("\n");
+  return { ok: false, conflict: lease !== undefined && now !== lease, err };
 }
 
 /** 推完分支后 git 会顺手建远端跟踪 ref（refs/remotes/<remote>/…），工作流删掉分支后它就成了残留。 */
@@ -189,6 +193,8 @@ function layoutFor(size) {
 
 const escapeHtml = (s) =>
   s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\|/g, "&#124;");
+/** 表头、链接文字里的文件名：HTML 转义之外再挡掉 markdown 的强调、代码、链接语法。 */
+const escapeMd = (s) => escapeHtml(s).replace(/[\\`*_[\]]/g, "\\$&");
 
 /** 图片按 cols 分块成表（表头即图注）；只有一张时不套表格。 */
 function renderGallery(items, colsOverride, widthOverride) {
@@ -201,7 +207,7 @@ function renderGallery(items, colsOverride, widthOverride) {
     const row = items.slice(i, i + cols);
     if (i) out.push("");
     out.push(
-      `| ${row.map((r) => escapeHtml(r.caption)).join(" | ")} |`,
+      `| ${row.map((r) => escapeMd(r.caption)).join(" | ")} |`,
       `| ${row.map(() => "---").join(" | ")} |`,
       `| ${row.map(img).join(" | ")} |`,
     );
@@ -237,8 +243,11 @@ function parseArgs(argv) {
     if (m) flags[m[1]] = m[2] ?? true;
     else positional.push(a);
   }
-  const known = new Set(["cols", "width", "remote", "repo", "inbox-base", "absorb", "help"]);
-  for (const k of Object.keys(flags)) if (!known.has(k)) die(`不认识的参数 --${k}\n${USAGE}`);
+  const valued = new Set(["cols", "width", "remote", "repo", "inbox-base"]);
+  for (const [k, v] of Object.entries(flags)) {
+    if (!valued.has(k) && k !== "absorb" && k !== "help") die(`不认识的参数 --${k}\n${USAGE}`);
+    if (valued.has(k) && (v === true || v === "")) die(`--${k} 要写成 --${k}=<值>`);
+  }
   return { flags, positional };
 }
 
@@ -267,8 +276,15 @@ function inboxBase(remote, override) {
 
 // ---------- 上传 ----------
 
-function upload(prArg, files, flags) {
-  if (!/^(\d{1,6}|draft)$/.test(prArg ?? "") || !files.length) die(USAGE);
+/** PR 号统一成不带前导 0 的数字（007 和 7 是同一个 ref）；0 和非数字返回 null。 */
+function prNumber(s) {
+  if (s === "draft") return "draft";
+  return /^\d{1,6}$/.test(s ?? "") && Number(s) > 0 ? String(Number(s)) : null;
+}
+
+function upload(prInput, files, flags) {
+  const prArg = prNumber(prInput);
+  if (!prArg || !files.length) die(USAGE);
   const colsOverride = flags.cols === undefined ? undefined : Number(flags.cols);
   const widthOverride = flags.width === undefined ? undefined : Number(flags.width);
   if (colsOverride !== undefined && !(Number.isInteger(colsOverride) && colsOverride >= 1 && colsOverride <= 4))
@@ -303,7 +319,9 @@ function upload(prArg, files, flags) {
       const ext = path.extname(file).toLowerCase();
       const base = path.basename(file, path.extname(file));
       const stem = `${label}/${crypto.randomBytes(4).toString("hex")}-${base.replace(/[^\w.-]+/g, "_")}`;
-      const add = (src, p) => entries.push(`100644 blob ${git(["hash-object", "-w", "--", src]).out}\t${p}`);
+      // --no-filters：仓库里的文件也按原样存，不让 .gitattributes（LFS、换行）改掉内容
+      const add = (src, p) =>
+        entries.push(`100644 blob ${git(["hash-object", "-w", "--no-filters", "--", src]).out}\t${p}`);
       add(file, `${stem}${ext}`);
       if (KINDS[ext] === "image") {
         gallery.push({ path: `${stem}${ext}`, caption: base, ...layoutFor(imageSize(file)) });
@@ -337,7 +355,7 @@ function upload(prArg, files, flags) {
     colsOverride,
     widthOverride,
   );
-  if (extras.length) md.push(...(md.length ? [""] : []), ...extras.map((e) => `[${e.text}](${url(e.path)})`));
+  if (extras.length) md.push(...(md.length ? [""] : []), ...extras.map((e) => `[${escapeMd(e.text)}](${url(e.path)})`));
   log(`已传到 ${where}，素材提交 ${sha}`);
   log("下面的 markdown 贴进 PR 描述：");
   console.log(md.join("\n"));
@@ -393,8 +411,9 @@ function pushInbox({ remote, label, prArg, commit, flags, env }) {
 function absorb(branch, flags) {
   const remote = typeof flags.remote === "string" ? flags.remote : "origin";
   const m = /^pr-assets-inbox\/(\d{1,6}|draft)-[\w.-]{1,40}$/.exec(branch ?? "");
-  if (!m) die(`不是 inbox 分支名（pr-assets-inbox/<PR号|draft>-<后缀>）：${branch}`);
-  const label = m[1] === "draft" ? "draft" : `pr-${m[1]}`;
+  const pr = m && prNumber(m[1]);
+  if (!pr) die(`不是 inbox 分支名（pr-assets-inbox/<PR号|draft>-<后缀>）：${branch}`);
+  const label = pr === "draft" ? "draft" : `pr-${pr}`;
   const ref = `refs/pr-assets/${label}`;
   const head = `refs/heads/${branch}`;
 

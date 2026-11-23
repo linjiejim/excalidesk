@@ -369,8 +369,10 @@ export function ConvertLayer({ session, host, presenting }: { session: DocSessio
     const w = popup.current?.offsetWidth ?? 160, h = popup.current?.offsetHeight ?? 44;
     let left: number, top: number;
     if (mine.mode === "button" && mine.anchor?.isConnected) {
+      // 贴着属性面板的右边弹出：Actions 那一排按钮会换行，按钮不一定在面板最右边，浮层不能盖住面板
       const b = mine.anchor.getBoundingClientRect();
-      left = b.right - box.left + 8;
+      const panel = mine.anchor.closest<HTMLElement>(".App-menu__left, .selected-shape-actions")?.getBoundingClientRect();
+      left = Math.max(b.right, panel?.right ?? 0) - box.left + 8;
       top = b.top - box.top + (b.height - h) / 2;
     } else {
       const st = api.getAppState();

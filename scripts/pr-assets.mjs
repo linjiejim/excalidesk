@@ -10,7 +10,8 @@
 // - 并发：推送带 --force-with-lease=<ref>:<读到的 tip>，而新提交的父提交就是那个 tip，所以这是一次比较并交换：
 //   别人先推了（客户端报 stale info，或服务端加锁时报 failed to update ref，以重读到的 tip 变了为准）就在新 tip 上重建，
 //   最多 8 次。旧提交都还在历史里，旧链接不会失效。
-// - 链接钉 SHA：https://raw.githubusercontent.com/<owner>/<repo>/<sha>/<path>，GitHub 经 camo 代理内嵌。
+// - 链接钉 SHA：https://raw.githubusercontent.com/<owner>/<repo>/<sha>/<path>。这是 GitHub 自己的域名，
+//   PR 页面直接内嵌，不经 camo 图片代理。
 //   输出用 <img width>：竖图 240 宽每行 3 列，横图 460 宽每行 2 列，多图成表、文件名当图注。
 //   视频（mp4/mov）用 ffmpeg 转 GIF 内嵌（fps=12、宽 ≤480、调色板两趟），附原片链接；没有 ffmpeg 就只给链接。
 // - 只收 png/jpg/webp/gif/mp4/mov，单文件 ≤50MB（GitHub 单文件硬上限 100MB）。零依赖：Node 内置模块 + git。
@@ -20,7 +21,7 @@
 //   所以分支 tip 是一个「载体」合并提交：树 = 默认分支的树（工作流文件在里面），第二个父提交 = 素材提交。
 //   打印的链接钉的是素材提交，推上去就能打开，搬完之后照样能打开。`--inbox-base=<提交>` 换载体的树，测试未合并的工作流用。
 // - 传上去就永久公开（谁都能按 SHA 打开，不清理旧 ref）：截图里不能有真实用户数据、密钥、本机路径。
-// - 图裂了先查 GitHub 的图片代理：`gh api markdown -f text='<img src="URL">'` 取出 camo 链接再 curl，只 curl raw 不算数。
+// - 图裂了：先 `curl -sI <链接>` 看是不是 200 和 image/*，再在浏览器里打开 PR 页面，看那张图的 naturalWidth 是不是 0。
 import { spawnSync } from "node:child_process";
 import crypto from "node:crypto";
 import fs from "node:fs";

@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import { CaptureUpdateAction, getCommonBounds } from "@excalidraw/excalidraw";
-import { TARGETS, TARGET_KEYS, changes, convert, currentOf, cycleOf, lift, merge, revert, styleOf, unitsOf, type Style, type Target, type Unit } from "./convert";
+import { TARGETS, TARGET_KEYS, changes, convert, currentOf, cycleOf, lift, merge, revert, styleOf, unitsOf, unlinked, type Style, type Target, type Unit } from "./convert";
 import type { El } from "./elements";
 import { t } from "./i18n";
 import type { DocSession } from "./session";
@@ -24,8 +24,13 @@ type Round = {
   style: Style;
   /** 循环中改过的元素 id，收起时要恢复它们 */
   touched: Set<string>;
+  /** 选中了、但转换不了的元素（箭头、图片……）：转换后照样选着 */
+  keep: string[];
   /** 我们自己设的选择：onChange 里看到它不算「用户换了选择」 */
   expect: string;
+  /** 这一轮关心的元素（单元、里面的文字、连着的箭头、改过的）最后一次写下去时的版本号。
+   *  对不上 = 别人（Agent、外部修改、历史恢复）改过，这一轮作废，不再拿 original 覆盖它们 */
+  written: Map<string, string>;
   anchor: HTMLElement | null;
 };
 
@@ -52,6 +57,51 @@ function unitsNow(s: DocSession): Unit[] {
   return unitsOf(api.getSceneElementsIncludingDeleted() as El[], api.getAppState().selectedElementIds ?? {});
 }
 
+const sceneOf = (r: Round) => (r.session.api?.getSceneElementsIncludingDeleted() ?? []) as El[];
+const selectedIds = (st: Record<string, any>) => Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
+
+/** 版本号 + nonce：合并时版本相同按 nonce 定胜负，只比版本号会漏掉另一台 Mac 恰好同版本的修改 */
+const stamp = (e: El) => `${e.version}:${e.versionNonce}`;
+
+/** 写完之后记下这一轮可能改到的元素（单元、里面的文字、连着的箭头、指着它们的批注、改过的）的版本；写之后再读：syncInvalidIndices 会原地抬高新元素的版本 */
+function record(r: Round) {
+  const ids = new Set(r.touched);
+  for (const u of r.units) {
+    for (const e of [u.el, u.text]) {
+      if (!e) continue;
+      ids.add(e.id);
+      for (const b of e.boundElements ?? []) if (b.type === "arrow") ids.add(b.id);
+    }
+  }
+  const units = new Set(r.units.map((u) => u.el.id));
+  const scene = sceneOf(r);
+  for (const e of scene) {
+    const targets = e.customData?.excalidesk?.comment?.targets;
+    if (Array.isArray(targets) && targets.some((t: string) => units.has(t))) ids.add(e.id);
+  }
+  r.written = new Map(scene.filter((e) => ids.has(e.id)).map((e) => [e.id, stamp(e)]));
+}
+
+/** 这一轮关心的元素被别人改过了吗 */
+function stale(r: Round) {
+  if (!r.session.api) return true;
+  let seen = 0;
+  for (const e of sceneOf(r)) {
+    const v = r.written.get(e.id);
+    if (v === undefined) continue;
+    if (v !== stamp(e)) return true;
+    seen++;
+  }
+  return seen !== r.written.size;
+}
+
+/** 别人改过：这一轮作废，场景保持现在的样子（别人的修改胜出），循环中的中间状态不进撤销记录 */
+function drop(r: Round) {
+  if (round !== r) return;
+  round = null;
+  notify();
+}
+
 function begin(s: DocSession, mode: Round["mode"], anchor: HTMLElement | null = null): Round | null {
   const api = s.api;
   if (!api) return null;
@@ -60,18 +110,29 @@ function begin(s: DocSession, mode: Round["mode"], anchor: HTMLElement | null = 
   const order = cycleOf(units);
   const cur = currentOf(units);
   const st = api.getAppState();
-  const selected = selMap(Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]));
-  return {
+  const ids = selectedIds(st);
+  const own = new Set(units.flatMap((u) => [u.el.id, u.text?.id ?? ""]));
+  const r: Round = {
     session: s, mode, units, anchor, order, ids: new Map(), touched: new Set(),
     original: (api.getSceneElementsIncludingDeleted() as El[]).map((e) => ({ ...e })),
-    selected, idx: cur ? order.indexOf(cur) : -1, style: styleOf(st), expect: selKey(Object.keys(selected)),
+    selected: selMap(ids), keep: ids.filter((id) => !own.has(id)), written: new Map(),
+    idx: cur ? order.indexOf(cur) : -1, style: styleOf(st), expect: selKey(ids),
   };
+  record(r);
+  return r;
 }
+
+/** 选择还是我们设的那套吗（别人换了选择，比如新建一页、开始放映，就别再改回去） */
+const ownsSelection = (r: Round) => {
+  const st = r.session.api?.getAppState();
+  return !!st && r.expect.split(",").every((id) => !id || st.selectedElementIds?.[id]);
+};
 
 /** 循环里的一步：从原样算出结果，不进撤销记录（NEVER），收起时再一次性记一步 */
 function step(r: Round, dir: 1 | -1) {
   const api = r.session.api;
   if (!api || !r.order.length) return;
+  if (stale(r)) return drop(r);
   const n = r.order.length;
   r.idx = r.idx < 0 ? (dir > 0 ? 0 : n - 1) : (r.idx + dir + n) % n;
   const target = r.order[r.idx];
@@ -81,35 +142,47 @@ function step(r: Round, dir: 1 | -1) {
   const back = revert([...r.touched].filter((id) => !now.has(id)), r.original, scene);
   const next = merge(scene, lift([...back, ...res.changed], scene), res.below);
   now.forEach((id) => r.touched.add(id));
-  const select = res.select.length ? res.select : Object.keys(r.selected);
+  const select = [...r.keep, ...res.select];
   r.expect = selKey(select);
   r.session.userInput();
   api.updateScene({ elements: next, appState: { selectedElementIds: selMap(select) }, captureUpdate: CaptureUpdateAction.NEVER });
+  record(r);
   notify();
 }
 
-/** 收起：恢复成原样（NEVER），再写入最终结果（IMMEDIATELY）——一整轮只占一步撤销 */
+/**
+ * 收起：恢复成原样（NEVER），再写入最终结果（IMMEDIATELY）——一整轮只占一步撤销。
+ * 新建的容器在恢复这一步里先以「已删除、不连任何东西」放进场景：撤销时它回到这个样子，
+ * 不会留下一个已删除、却还登记着文字的容器（重新打开时 restoreElements 会把文字绑回去）
+ */
 function finish(target: Target | null) {
   const r = round;
   if (!r) return;
+  if (stale(r)) return drop(r);
   round = null;
   notify();
   const api = r.session.api;
   if (!api) return;
   r.session.userInput();
+  const own = ownsSelection(r);
   let scene = api.getSceneElementsIncludingDeleted() as El[];
   const final = target && r.units.some((u) => changes(u, target)) ? convert(r.original, r.units, target, r.style, r.ids) : null;
-  if (r.touched.size) {
-    scene = merge(scene, revert(r.touched, r.original, scene));
-    api.updateScene({ elements: scene, appState: { selectedElementIds: r.selected }, captureUpdate: CaptureUpdateAction.NEVER });
+  const back = revert(r.touched, r.original, scene);
+  const placed = new Set([...scene.map((e) => e.id), ...back.map((e) => e.id)]);
+  const holders = (final?.changed ?? []).filter((e) => !placed.has(e.id)).map(unlinked);
+  if (back.length || holders.length) {
+    scene = merge(scene, [...back, ...holders], final?.below);
+    api.updateScene({ elements: scene, ...(own && { appState: { selectedElementIds: r.selected } }), captureUpdate: CaptureUpdateAction.NEVER });
+    scene = api.getSceneElementsIncludingDeleted() as El[];
   }
   if (final) {
-    api.updateScene({ elements: merge(scene, lift(final.changed, scene), final.below), appState: { selectedElementIds: selMap(final.select) }, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    const select = selMap([...r.keep, ...final.select]);
+    api.updateScene({ elements: merge(scene, lift(final.changed, scene), final.below), ...(own && { appState: { selectedElementIds: select } }), captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   }
 }
 
 /** 直接转换（⇧R 等）：一次转换一步撤销。没有可转换的、或者都已经是这个类型，返回 false */
-export function convertSelection(s: DocSession, target: Target): boolean {
+function convertSelection(s: DocSession, target: Target): boolean {
   if (round) {
     finish(target);
     return true;
@@ -121,9 +194,10 @@ export function convertSelection(s: DocSession, target: Target): boolean {
   return true;
 }
 
-function open(r: Round | null) {
+/** 打开新的一轮：先把开着的那一轮收起（写完），再从收起后的场景开始，否则新一轮的快照和版本号马上就过期 */
+function open(make: () => Round | null) {
   if (round) finish(liveTarget(round));
-  round = r;
+  round = make();
   notify();
 }
 
@@ -170,7 +244,7 @@ export function convertKey(s: DocSession, e: React.KeyboardEvent, presenting: bo
     const r = begin(s, "tab");
     if (!r) return false;
     stop();
-    open(r);
+    open(() => r);
     return true;
   }
   if (e.shiftKey && !mod && !e.repeat && TARGET_KEYS[e.code]) {
@@ -242,10 +316,12 @@ function useActionsSlot(host: HTMLElement | null) {
  */
 let lastSel: unknown = null;
 export function onConvertChange(s: DocSession, appState: Record<string, any>) {
+  const r = round;
+  // 浮层开着时别人改了这一轮的元素（Agent、外部修改、历史恢复）：作废，不拿开始前的快照覆盖回去
+  if (r && r.session === s && stale(r)) return drop(r);
   const sel = appState.selectedElementIds;
   if (sel === lastSel) return;
   lastSel = sel;
-  const r = round;
   // 只看我们选中的那些还在不在：在分组里转换时 Excalidraw 会把选择扩到组里其他元素，那不算用户换了选择
   if (r && r.session === s && r.expect.split(",").some((id) => id && !sel?.[id])) queueMicrotask(() => round === r && finish(liveTarget(r)));
   notify();
@@ -319,7 +395,11 @@ export function ConvertLayer({ session, host, presenting }: { session: DocSessio
             title={t("convert.trigger")}
             aria-label={t("convert.title")}
             aria-expanded={mine?.mode === "button"}
-            onClick={(e) => (mine?.mode === "button" ? finish(null) : open(begin(session, "button", e.currentTarget)))}
+            onClick={(e) => {
+              const btn = e.currentTarget;
+              if (mine?.mode === "button") finish(liveTarget(mine));
+              else open(() => begin(session, "button", btn));
+            }}
           >
             <div className="ToolIcon__icon" aria-hidden="true">{TRIGGER_ICON}</div>
           </button>,

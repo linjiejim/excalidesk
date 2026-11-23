@@ -16,7 +16,7 @@ const PAD = 5; // Excalidraw 的 BOUND_TEXT_PADDING
 /** 一个可转换的单元：独立文本，或者矩形 / 菱形 / 椭圆（连同它里面的文字） */
 export type Unit = { el: El; text: El | null };
 
-export const kindOf = (u: Unit): Target => (u.el.type === "text" ? "text" : (u.el.type as Target));
+const kindOf = (u: Unit): Target => (u.el.type === "text" ? "text" : (u.el.type as Target));
 
 /** 新建容器用的样式（文本 → 形状）：描边颜色和透明度跟文字走，其余用当前画笔的样式，和 Excalidraw 的「将文本包围在容器中」一样 */
 export type Style = { backgroundColor: string; fillStyle: string; strokeWidth: number; strokeStyle: string; roughness: number; roundness: "round" | "sharp" };
@@ -85,7 +85,7 @@ function containerDim(d: number, type: string) {
 
 const roundnessFor = (type: string) => ({ type: type === "rectangle" ? ROUNDNESS.ADAPTIVE_RADIUS : ROUNDNESS.PROPORTIONAL_RADIUS });
 
-export type Result = {
+type Result = {
   /** 改过的和新建的元素 */
   changed: El[];
   /** 新建的元素放在谁的下面（id → 紧挨着它上面那个元素的 id） */
@@ -280,7 +280,7 @@ export function hitOutline(e: El, p: Pt, d: Pt): number | null {
 }
 
 /** 连着的元素换了轮廓：两头端点沿最后一段的方向挪到新轮廓上（留原来的 gap），碰不到就朝中心。返回新箭头，没动就返回原来的 */
-export function reanchor(arrow: El, target: (id: string | undefined) => El | undefined): El {
+function reanchor(arrow: El, target: (id: string | undefined) => El | undefined): El {
   const pts: Pt[] = (arrow.points as [number, number][] | undefined)?.map(([x, y]) => ({ x: arrow.x + x, y: arrow.y + y })) ?? [];
   if (pts.length < 2 || arrow.angle) return arrow;
   let moved = false;
@@ -341,7 +341,13 @@ export function lift(els: readonly El[], scene: readonly El[]): El[] {
   });
 }
 
-/** 撤回到 original：这些 id 的元素恢复成 original 里的样子；original 里没有的（这一轮新建的容器）标成删除 */
+/**
+ * 已删除、不连任何东西的样子。删掉的容器不能还在 boundElements 里登记着文字：
+ * 打开文件和合并时 restoreElements({ repairBindings }) 不跳过已删除的容器，会把活着的文字绑回去，文字就再也点不中了
+ */
+export const unlinked = (e: El): El => ({ ...e, isDeleted: true, boundElements: [] });
+
+/** 撤回到 original：这些 id 的元素恢复成 original 里的样子；original 里没有的（这一轮新建的容器）标成删除、去掉链接 */
 export function revert(ids: Iterable<string>, original: readonly El[], scene: readonly El[]): El[] {
   const orig = new Map(original.map((e) => [e.id, e]));
   const cur = new Map(scene.map((e) => [e.id, e]));
@@ -350,7 +356,7 @@ export function revert(ids: Iterable<string>, original: readonly El[], scene: re
     const c = cur.get(id);
     if (!c) continue;
     const o = orig.get(id);
-    out.push(o ? ({ ...o, version: c.version + 1, versionNonce: nonce() } as El) : ({ ...c, isDeleted: true, version: c.version + 1, versionNonce: nonce() } as El));
+    out.push({ ...(o ?? unlinked(c)), version: c.version + 1, versionNonce: nonce() } as El);
   }
   return out;
 }

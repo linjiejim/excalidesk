@@ -265,7 +265,7 @@ pub fn tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "get_feedback",
-            description: "What the user did since you last looked at this drawing: open comments (notes pinned to elements; `new` if you haven't seen them), and the elements they added, modified or removed. `sent` tells whether they pressed \"Send to agent\". Marks everything as seen.",
+            description: "What the user did since you last looked at this drawing: open comments (notes pinned to elements; `new` if you haven't seen them, `edited` if the user changed the text since you last looked, which also reopens a comment you resolved), and the elements they added, modified or removed. `sent` tells whether they pressed \"Send to agent\". Marks everything as seen.",
             schema: schema::<FeedbackArgs>,
             read_only: true,
         },

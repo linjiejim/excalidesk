@@ -8,7 +8,7 @@ import { exportActive, toggleHistory } from "./actions";
 import { startComment } from "./agent";
 import { ConvertLayer, convertKey, onConvertChange, onConvertScroll } from "./ConvertMenu";
 import { t, useT } from "./i18n";
-import { guardFoldedClick, NotesLayer, onNotesChange, toggleNotes } from "./NotesLayer";
+import { NotesLayer, onNotesChange, toggleNotes } from "./NotesLayer";
 import { exportPdf } from "./pdf";
 import { togglePresentation } from "./present";
 import { addNotes, newSlide } from "./slides";
@@ -56,17 +56,9 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
     },
     [session, presenting],
   );
-  const onPointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      session.userInput();
-      guardFoldedClick(session, e, "pointerdown");
-    },
-    [session],
-  );
-  const onDoubleClick = useCallback((e: React.MouseEvent) => void guardFoldedClick(session, e, "dblclick"), [session]);
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
-    <div ref={setHost} className="excalidraw-host" onPointerDownCapture={onPointerDown} onDoubleClickCapture={onDoubleClick} onKeyDownCapture={onKey}>
+    <div ref={setHost} className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}

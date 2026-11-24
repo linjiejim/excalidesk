@@ -1,11 +1,11 @@
-// 收起批注（docs/specs/20261124-fold-notes.md）：开关（⇧C）、收起后画布上的小圆点、挡住会改到藏起来的批注的点击。
+// 收起批注（docs/specs/20261124-fold-notes.md）：开关（⇧C）、收起后画布上的小圆点。
+// 藏起来的批注是锁住的：Excalidraw 0.18.1 点击、框选、双击写字、文字工具、橡皮擦都会跳过锁住的元素，不用另外拦。
 // 批注在画布上怎么藏、存盘和 Agent 读写时怎么还原，见 elements.ts（fold / unfold）和 session.ts。
 import { useMemo, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { getCommonBounds } from "@excalidraw/excalidraw";
 import { sessions } from "./actions";
 import { editComment } from "./agent";
-import { boundTextOf, commentOf, ext, isComment, isCommentLike, isFolded, noteIdOf, pinPoint, REPLY_SEP, type El } from "./elements";
+import { boundTextOf, commentOf, ext, isComment, pinPoint, REPLY_SEP, type El } from "./elements";
 import { t } from "./i18n";
 import type { DocSession } from "./session";
 import { getState, setState, useShell } from "./store";
@@ -66,6 +66,8 @@ function pinsOf(els: readonly El[]): Pin[] {
 export function NotesLayer({ session, host, presenting }: { session: DocSession; host: HTMLElement | null; presenting: boolean }) {
   useViewTick();
   const folded = useShell((s) => s.notesFolded);
+  // 正在改的那条：小圆点高亮、不再浮出文字（输入框里就是它）
+  const editing = useShell((s) => (s.commentDraft?.path === session.path ? s.commentDraft.editing : undefined));
   const api = session.api;
   const els = (api?.getSceneElementsIncludingDeleted() ?? null) as El[] | null;
   const pins = useMemo(() => (folded && els ? pinsOf(els) : []), [folded, els]);
@@ -82,7 +84,7 @@ export function NotesLayer({ session, host, presenting }: { session: DocSession;
           <button
             key={p.id}
             type="button"
-            className={`xd-pin${p.resolved ? " resolved" : ""}`}
+            className={`xd-pin${p.resolved ? " resolved" : ""}${p.id === editing ? " active" : ""}`}
             style={{ left, top }}
             aria-label={t("notes.pin")}
             onClick={() => editComment(session, p.id)}
@@ -94,34 +96,4 @@ export function NotesLayer({ session, host, presenting }: { session: DocSession;
     </div>,
     root,
   );
-}
-
-// ── 藏起来的批注不能被双击、文字工具改到 ──────────────────
-// 锁住的元素点不中、框选不到，但 Excalidraw 找「往哪个容器里写字」时不看 locked：
-// 在藏着的便签上双击（或拿文字工具点一下）会去改它的文字，在藏着的箭头上双击会给它加标签。
-// 收起时拦下这两种点击；那个位置有一条藏着的批注，就打开它的输入框。
-
-/** 处理了返回 true（调用方别再往下传） */
-export function guardFoldedClick(s: DocSession, e: React.MouseEvent, kind: "dblclick" | "pointerdown"): boolean {
-  const api = s.api;
-  if (!api || !getState().notesFolded || (e.target as HTMLElement).tagName !== "CANVAS") return false;
-  const st = api.getAppState();
-  if (kind === "pointerdown" && st.activeTool?.type !== "text") return false;
-  const z = st.zoom.value;
-  const x = (e.clientX - st.offsetLeft) / z - st.scrollX;
-  const y = (e.clientY - st.offsetTop) / z - st.scrollY;
-  const pad = 4 / z;
-  const els = api.getSceneElements() as El[];
-  for (let i = els.length - 1; i >= 0; i--) {
-    const el = els[i];
-    if (!isFolded(el) || !isCommentLike(el)) continue;
-    const [x1, y1, x2, y2] = getCommonBounds([el as any]);
-    if (x < x1 - pad || x > x2 + pad || y < y1 - pad || y > y2 + pad) continue;
-    e.preventDefault();
-    e.stopPropagation();
-    const note = noteIdOf(el);
-    if (note) editComment(s, note);
-    return true;
-  }
-  return false;
 }

@@ -234,6 +234,8 @@ html:not([data-laser]) .shell.presenting .excalidraw canvas.interactive { cursor
 .shell .excalidraw button.xd-pin.resolved, .shell .excalidraw button.xd-pin.resolved:hover { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: #adb5bd; }
 .excalidraw .xd-pin__peek { display: none; position: absolute; left: 14px; top: -8px; width: max-content; max-width: 240px; max-height: calc(8 * 1.45em); overflow: hidden; padding: 6px 9px; border-radius: 8px; background: #fff9db; border: 1px solid #f5c26b; box-shadow: 0 4px 14px rgba(0, 0, 0, .14); color: #1d1d1f; font: 12.5px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; text-align: left; white-space: pre-wrap; pointer-events: none; }
 .excalidraw .xd-pin:hover .xd-pin__peek { display: block; }
+.shell .excalidraw button.xd-pin.active { box-shadow: 0 0 0 4px rgba(240, 140, 0, .35), 0 1px 3px rgba(0, 0, 0, .3); }
+.excalidraw .xd-pin.active .xd-pin__peek { display: none; }
 .excalidraw .xd-pin.resolved .xd-pin__peek { background: #f1f3f5; border-color: #ced4da; color: #495057; }
 .shell.presenting .excalidraw .xd-pins { display: none; }
 .shell .agent-bar button.link[aria-pressed="true"] { background: var(--hover); }

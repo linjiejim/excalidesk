@@ -10,7 +10,7 @@ import { startPresentation } from "./present";
 import { exportPdf, renderPdf } from "./pdf";
 import { addNotes, buildFrame, newSlide, slidesOf } from "./slides";
 import { hitOutline } from "./convert";
-import { commitComment, runOp } from "./agent";
+import { commitComment, editComment, runOp } from "./agent";
 import { toggleNotes } from "./NotesLayer";
 
 type Step = { name: string; ok: boolean; ms: number; detail?: unknown };
@@ -805,27 +805,36 @@ export async function runSelftest() {
     return "ok";
   });
 
-  await step("批注：收起时在藏着的便签上双击、拿文字工具点，不会改到它，而是打开它", async () => {
+  await step("批注：收起时在藏着的便签上双击、拿文字工具点，Excalidraw 不会改到它（锁住的元素它自己跳过）", async () => {
+    const versions = () => JSON.stringify(parts.map((id) => [id, nget(id).version, nget(id).isDeleted]));
+    const before = versions();
     const st = napi().getAppState(), n = nget(note), z = st.zoom.value;
     const canvas = document.querySelector(".excalidraw canvas.interactive")!;
     const at = { clientX: (n.x + 20 + st.scrollX) * z + st.offsetLeft, clientY: (n.y + 20 + st.scrollY) * z + st.offsetTop, bubbles: true, cancelable: true };
+    const endEdit = async () => {
+      document.querySelector(".excalidraw-wysiwyg")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      await sleep(150);
+    };
+    const mine = (ed: any) => ed && (parts.includes(ed.id) || ed.containerId === note);
     canvas.dispatchEvent(new MouseEvent("dblclick", at));
-    await sleep(100);
-    if (getState().commentDraft?.editing !== note) throw new Error("双击：没打开那条批注");
-    if (napi().getAppState().editingTextElement) throw new Error("双击：开始改藏着的文字了");
-    setState({ commentDraft: null });
+    await sleep(120);
+    const ed1 = napi().getAppState().editingTextElement;
+    await endEdit();
+    if (!ed1) throw new Error("双击没开始写字（这一步没测到东西）");
+    if (mine(ed1)) throw new Error("双击：开始改藏着的批注了");
     napi().setActiveTool({ type: "text" });
     await sleep(50);
     canvas.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true }));
     canvas.dispatchEvent(new PointerEvent("pointerup", { ...at, pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true }));
-    await sleep(100);
-    const opened = getState().commentDraft?.editing === note, editing = !!napi().getAppState().editingTextElement;
-    setState({ commentDraft: null });
+    await sleep(120);
+    const ed2 = napi().getAppState().editingTextElement;
+    await endEdit();
     napi().setActiveTool({ type: "selection" });
-    if (!opened) throw new Error("文字工具：没打开那条批注");
-    if (editing) throw new Error("文字工具：开始改藏着的文字了");
-    if (nget(note).boundElements?.filter((b: any) => b.type === "text").length !== 1) throw new Error("便签多绑了文字");
-    return "ok";
+    if (mine(ed2)) throw new Error("文字工具：开始改藏着的批注了");
+    if (versions() !== before) throw new Error("藏着的批注被改了");
+    if (getState().commentDraft) throw new Error("不该打开批注输入框");
+    if (!shownFolded()) throw new Error("批注露出来了");
+    return { dblclick: !!ed1, textTool: !!ed2 };
   });
 
   await step("批注：点小圆点改文字——已处理的重新打开，⌘Z 一步撤销", async () => {
@@ -874,6 +883,113 @@ export async function runSelftest() {
     const f = await nfile();
     const notes = f.filter((e) => !e.isDeleted && e.customData?.excalidesk?.comment);
     if (notes.length !== 1 || f.find((e) => e.containerId === note).originalText !== "third note") throw new Error(`批注 ${notes.length} 条`);
+    return "ok";
+  });
+
+  // 撤销重做只换改过的字段：展开时记下的一步，收起后撤销（或反过来），文件里的批注也必须是原样
+  const noteFile = async () => {
+    const f = await nfile();
+    const n = f.find((e) => e.id === note), txt = f.find((e) => e.containerId === note), arrow = f.find((e) => parts.includes(e.id) && e.type === "arrow");
+    return { n, txt, arrow, status: n.customData.excalidesk.comment.status, leaked: [n, txt, arrow].filter((e) => e.customData?.excalidesk?.folded || e.locked || e.opacity === 0).map((e) => e.id) };
+  };
+  await step("批注：展开时改的，收起后 ⌘Z / ⇧⌘Z——文件里批注不透明、没锁、没记号", async () => {
+    // 上一步展开时把已处理的批注改成 third note（重新打开）
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    let n0 = session(notesDoc).saves;
+    undo();
+    await savedAfter(n0);
+    let f = await noteFile();
+    if (f.leaked.length || f.status !== "resolved" || f.n.opacity !== 70 || f.txt.opacity !== 80 || f.arrow.opacity !== 60) throw new Error(`⌘Z 后 ${JSON.stringify({ leaked: f.leaked, status: f.status, o: [f.n.opacity, f.txt.opacity, f.arrow.opacity] })}`);
+    if (!shownFolded()) throw new Error("⌘Z 后批注露出来了");
+    n0 = session(notesDoc).saves;
+    hk("z", "KeyZ", { metaKey: true, shiftKey: true });
+    await savedAfter(n0);
+    f = await noteFile();
+    if (f.leaked.length || f.status !== "open" || f.n.opacity !== 100 || f.txt.opacity !== 100 || f.arrow.opacity !== 100) throw new Error(`⇧⌘Z 后 ${JSON.stringify({ leaked: f.leaked, status: f.status, o: [f.n.opacity, f.txt.opacity, f.arrow.opacity] })}`);
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    if (getState().notesFolded || nget(note).opacity !== 100 || nget(note).locked) throw new Error("展开后便签不对");
+    return "ok";
+  });
+
+  await step("批注：展开时 Agent 处理批注，收起后 ⌘Z——文件里批注回到未处理、不透明、没锁", async () => {
+    await runOp("resolve", { path: notesDoc, agent: "selftest", comments: [{ id: note, reply: "again" }] });
+    await waitFor(() => tabOf(notesDoc)?.save === "saved", 8000);
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    const n0 = session(notesDoc).saves;
+    undo();
+    await savedAfter(n0);
+    const f = await noteFile();
+    if (f.leaked.length || f.status !== "open" || f.n.opacity !== 100 || f.txt.opacity !== 100 || f.arrow.opacity !== 100) throw new Error(`${JSON.stringify({ leaked: f.leaked, status: f.status, o: [f.n.opacity, f.txt.opacity, f.arrow.opacity] })}`);
+    if (!shownFolded()) throw new Error("批注露出来了");
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    if (parts.some((id) => nget(id).locked || nget(id).opacity === 0)) throw new Error("展开后还锁着或透明");
+    return "ok";
+  });
+
+  await step("批注：展开时用户自己锁住的批注，存盘是锁住的，收起再展开还锁着", async () => {
+    const lockNote = async (locked: boolean) => {
+      const n0 = session(notesDoc).saves;
+      edit(notesDoc, (els) => els.map((e) => (e.id === note ? { ...e, locked, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)));
+      await savedAfter(n0);
+      return (await nfile()).find((e) => e.id === note);
+    };
+    if (getState().notesFolded) throw new Error("这一步要从展开开始");
+    const locked = await lockNote(true);
+    if (!locked.locked || locked.customData.excalidesk.folded) throw new Error(`锁住后文件里 locked=${locked.locked}`);
+    const n0 = session(notesDoc).saves;
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(1200);
+    if (!nget(note).locked || nget(note).customData.excalidesk.folded) throw new Error("收起再展开后没锁了");
+    if (session(notesDoc).saves !== n0) throw new Error("收起再展开写了盘");
+    const unlocked = await lockNote(false);
+    if (unlocked.locked) throw new Error("解锁没存下");
+    return "ok";
+  });
+
+  await step("批注：收起时撤销、展开后再撤销——Excalidraw 撤销快照里留下的拼凑值不会变成锁住 / 透明", async () => {
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    const change = async (text: string) => {
+      const n0 = session(notesDoc).saves;
+      editComment(session(notesDoc), note);
+      commitComment(text);
+      await savedAfter(n0);
+    };
+    const back = async () => {
+      const n0 = session(notesDoc).saves;
+      undo();
+      await savedAfter(n0);
+    };
+    await change("fourth note");
+    await back();
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    await change("fifth note");
+    await back();
+    const f = await noteFile();
+    if (f.leaked.length) throw new Error(`文件里 ${JSON.stringify(f.leaked)}`);
+    if (parts.some((id) => nget(id).locked || nget(id).opacity === 0)) throw new Error("画布上的批注锁住 / 透明了");
+    return "ok";
+  });
+
+  await step("批注：删掉的锁住批注，收起后不会一直抬版本、存盘", async () => {
+    const n0 = session(notesDoc).saves;
+    edit(notesDoc, (els) => els.map((e) => (parts.includes(e.id) ? { ...e, locked: true, isDeleted: true, version: e.version + 1, versionNonce: e.versionNonce + 1 } : e)));
+    await savedAfter(n0);
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(300);
+    const n1 = session(notesDoc).saves, v1 = nget(note).version;
+    await sleep(2500);
+    const grew = { saves: session(notesDoc).saves - n1, version: nget(note).version - v1 };
+    hk("C", "KeyC", { shiftKey: true });
+    await sleep(100);
+    if (grew.saves || grew.version) throw new Error(`一直在存 ${JSON.stringify(grew)}`);
     return "ok";
   });
 

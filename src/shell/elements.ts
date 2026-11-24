@@ -34,32 +34,75 @@ export const isOpenComment = (e: El) => !e.isDeleted && isComment(e) && ext(e)!.
 export const noteIdOf = (e: El): string | undefined => (isComment(e) ? e.id : commentOf(e));
 
 // ── 收起批注（只影响画布上的样子）─────────────────────
-// 收起时画布上的批注元素换成「显示形态」：透明、锁住（点不中、框选不到），原来的 opacity / locked 记在
+// 收起时画布上的批注元素换成「显示形态」：透明、锁住（点不中、框选不到），原样的 opacity / locked 记在
 // customData.excalidesk.folded 里。版本号和 nonce 都不变，所以 Excalidraw 不记撤销、DocSession 不算改动。
-// 显示形态只活在画布上：保存、Agent 读写、另存为之前都由 DocSession 用 unfold 还原，文件里永远是原样。
+// 显示形态只活在画布上：保存、Agent 读写、另存为之前都由 DocSession 还原，文件里永远是原样。
+//
+// 撤销重做只换改过的那几个字段，可能把显示形态和原样拼在一起（比如换回一份没有记号的 customData，
+// opacity 却还是 0）。所以原样不能只看记号，按 realOf 的规矩算。DocSession 另外保证撤销记录里只有原样
+// （session.ts apply），拼出来的情况只剩撤销重做那一刻，算一次就回到正轨。
+
+export type Real = { opacity: number; locked: boolean };
+/** 每个批注元素上次算出的原样（按 id）：记号被撤销换掉时靠它。一个 DocSession 一份 */
+export type RealMemo = Map<string, Real>;
 
 export const isFolded = (e: El) => !!ext(e)?.folded;
-/** 已经是显示形态：有记号、透明、锁住（撤销重做、「全部解锁」可能只改回其中一样） */
-const foldedView = (e: El) => isFolded(e) && e.opacity === 0 && e.locked === true;
+const hiddenValues = (e: El) => e.opacity === 0 && e.locked === true;
 
-export function fold(e: El): El {
-  if (foldedView(e)) return e;
-  if (isFolded(e)) return { ...e, opacity: 0, locked: true };
-  return { ...e, opacity: 0, locked: true, customData: { ...e.customData, excalidesk: { ...ext(e), folded: { opacity: e.opacity ?? 100, locked: !!e.locked } } } };
+/**
+ * 批注元素原样的 opacity / locked。folded = 画布现在是收起的（这时批注上的隐藏值只可能是显示形态留下的）。
+ * - 没有记号、也没收起：元素上的就是原样（展开时用户自己锁住、调透明，都照存）。
+ * - 否则：不是隐藏值的（opacity ≠ 0、locked ≠ true）就是原样（撤销重做刚换回来的）；是隐藏值才看记号，
+ *   记号也被换掉了就看 memo。所以存出去的批注不会是透明或锁住的，除非它原来就是。
+ */
+export function realOf(e: El, memo: RealMemo | undefined, folded: boolean): Real {
+  const f = ext(e)?.folded as Real | undefined;
+  if (!f && !folded) return { opacity: e.opacity ?? 100, locked: !!e.locked };
+  const m = memo?.get(e.id);
+  return {
+    opacity: e.opacity !== 0 ? (e.opacity ?? 100) : (f?.opacity ?? m?.opacity ?? 100),
+    locked: e.locked !== true ? false : (f?.locked ?? m?.locked ?? true),
+  };
 }
 
-export function unfold<T extends El>(e: T): T {
+/**
+ * 撤销重做拼出来的批注元素：有记号、值却不全是隐藏值；或者收起时没记号、值里却有隐藏值（收起时藏着的批注
+ * 用户锁不了、也调不了透明度，所以只可能是撤销重做留下的）。
+ * Excalidraw 会把撤销重做的结果存进它的撤销快照，所以这种元素要抬版本存回原样（DocSession.applyNoteView），
+ * 不然以后的撤销（哪怕是展开时）又会把拼出来的字段换回来。
+ */
+export const isMixed = (e: El, folded: boolean) =>
+  // 删掉的不算：noteView 不收起删掉的元素，它们一直是原样，算进来会一直抬版本
+  isCommentLike(e) && !e.isDeleted && (isFolded(e) ? !hiddenValues(e) : folded && (e.opacity === 0 || e.locked === true));
+
+export function fold(e: El, memo: RealMemo | undefined, folded: boolean): El {
+  const r = realOf(e, memo, folded);
+  memo?.set(e.id, r);
   const f = ext(e)?.folded;
-  if (!f) return e;
-  const { folded: _, ...rest } = ext(e)!;
-  return { ...e, opacity: f.opacity, locked: f.locked, customData: { ...e.customData, excalidesk: rest } };
+  if (hiddenValues(e) && f?.opacity === r.opacity && f?.locked === r.locked) return e;
+  return { ...e, opacity: 0, locked: true, customData: { ...e.customData, excalidesk: { ...ext(e), folded: r } } };
 }
 
-/** 整个场景换成该有的样子：收起时批注（没删的）都是显示形态，展开时没有一个带记号。没变就返回原数组 */
-export function noteView<T extends El>(els: readonly T[], folded: boolean): readonly T[] {
+/** 还原成原样（只动批注元素；本来就是原样的原样返回） */
+export function unfold<T extends El>(e: T, memo: RealMemo | undefined, folded: boolean): T {
+  if (!isCommentLike(e)) return e;
+  const r = realOf(e, memo, folded);
+  memo?.set(e.id, r);
+  const f = ext(e)?.folded;
+  if (!f && e.opacity === r.opacity && !!e.locked === r.locked) return e;
+  const { folded: _, ...rest } = ext(e)!;
+  return { ...e, opacity: r.opacity, locked: r.locked, ...(f ? { customData: { ...e.customData, excalidesk: rest } } : {}) };
+}
+
+/**
+ * 批注元素换样子：show = 换成显示形态（没删的），否则还原成原样。folded = 画布现在是不是收起的（见 realOf）。
+ * 没变就返回原数组。
+ */
+export function noteView<T extends El>(els: readonly T[], folded: boolean, show: boolean, memo?: RealMemo): readonly T[] {
   let out: T[] | null = null;
   els.forEach((e, i) => {
-    const want = folded && !e.isDeleted && isCommentLike(e) ? (fold(e) as T) : unfold(e);
+    if (!isCommentLike(e)) return;
+    const want = (show && !e.isDeleted ? fold(e, memo, folded) : unfold(e, memo, folded)) as T;
     if (want !== e) (out ??= [...els])[i] = want;
   });
   return out ?? els;
@@ -67,7 +110,11 @@ export function noteView<T extends El>(els: readonly T[], folded: boolean): read
 
 /** 场景和该有的样子对不上（撤销重做、合并、别的代码换了整个场景之后） */
 export const viewMismatch = (els: readonly El[], folded: boolean) =>
-  els.some((e) => (folded && !e.isDeleted && isCommentLike(e) ? !foldedView(e) : isFolded(e)));
+  els.some((e) => {
+    if (!isCommentLike(e)) return false;
+    if (isMixed(e, folded)) return true;
+    return folded && !e.isDeleted ? !(hiddenValues(e) && isFolded(e)) : isFolded(e);
+  });
 
 /** 收起后小圆点的位置：有箭头就在箭头指着的那一头（目标元素旁边），没有就在便签左上角 */
 export function pinPoint(note: El, arrow: El | undefined): { x: number; y: number } {

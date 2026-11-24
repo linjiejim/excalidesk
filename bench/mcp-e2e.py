@@ -4,13 +4,16 @@
 用临时工作区、临时状态文件和单独的 socket，不碰正在用的 Excalidesk。App 以 --mcp-selftest 启动：
 Agent 一调用 wait_for_feedback，前端就替用户给 id 为 login 的元素加一条批注并点「发回」。
 
-用法：bench/mcp-e2e.py [App 路径，默认 src-tauri/target/release/bundle/macos/Excalidesk.app]
+用法：bench/mcp-e2e.py [--show] [App 路径，默认 src-tauri/target/release/bundle/macos/Excalidesk.app]
+默认无头（--headless：窗口停在屏幕外、不抢前台）；--show 用正常窗口跑。
 """
 import json, os, shutil, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-APP = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "src-tauri/target/release/bundle/macos/Excalidesk.app"
+ARGS = [a for a in sys.argv[1:] if a != "--show"]
+SHOW = "--show" in sys.argv[1:]
+APP = Path(ARGS[0]) if ARGS else ROOT / "src-tauri/target/release/bundle/macos/Excalidesk.app"
 EXE = APP / "Contents/MacOS/excalidesk"
 TMP = Path(tempfile.mkdtemp(prefix="excalidesk-mcp-e2e-"))
 WS = TMP / "workspace"
@@ -95,7 +98,7 @@ def js(texts):
     return json.loads(texts[0])
 
 
-app = subprocess.Popen([str(EXE), f"--state={STATE}", "--mcp-selftest"], env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+app = subprocess.Popen([str(EXE), f"--state={STATE}", "--mcp-selftest", *([] if SHOW else ["--headless"])], env=ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 try:
     for _ in range(80):
         if SOCK.exists():

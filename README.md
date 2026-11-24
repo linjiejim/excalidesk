@@ -39,8 +39,8 @@ claude mcp add excalidesk -s user -- /Applications/Excalidesk.app/Contents/MacOS
 npm install
 npm run tauri dev        # 开发模式
 npm run app              # 打包 .app → src-tauri/target/release/bundle/macos/
-npm run selftest         # 构建并在真 App 里跑端到端自测
-bench/mcp-e2e.py         # 扮演 Agent 走一遍 MCP 协作（先 npm run app）
+npm run selftest         # 构建并在真 App 里跑端到端自测（无头：窗口在屏幕外、不抢前台；-- --show 看过程）
+bench/mcp-e2e.py         # 扮演 Agent 走一遍 MCP 协作（先 npm run app；同样无头，--show 看过程）
 npm run release          # 打发布包（不带测试场景）→ release/Excalidesk_<版本>_<架构>.dmg
 npm run dev              # 只在浏览器里看界面（用假数据，不需要 Tauri）
 ```

@@ -811,9 +811,14 @@ export async function runSelftest() {
     const st = napi().getAppState(), n = nget(note), z = st.zoom.value;
     const canvas = document.querySelector(".excalidraw canvas.interactive")!;
     const at = { clientX: (n.x + 20 + st.scrollX) * z + st.offsetLeft, clientY: (n.y + 20 + st.scrollY) * z + st.offsetTop, bubbles: true, cancelable: true };
+    // 文字工具在 pointerup 时才建输入框：等它出来再按 Esc，并确认真的退出了写字（没退出的话，后面的撤销和快捷键都会被 Excalidraw 挡住）
+    const editing = () => napi().getAppState().editingTextElement;
     const endEdit = async () => {
+      await waitFor(() => !editing() || document.querySelector(".excalidraw-wysiwyg"), 1000).catch(() => null);
       document.querySelector(".excalidraw-wysiwyg")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
-      await sleep(150);
+      await waitFor(() => !editing(), 1000).catch(() => {
+        throw new Error(`没退出写字：输入框 ${document.querySelectorAll(".excalidraw-wysiwyg").length} 个，newElement ${!!napi().getAppState().newElement}`);
+      });
     };
     const mine = (ed: any) => ed && (parts.includes(ed.id) || ed.containerId === note);
     canvas.dispatchEvent(new MouseEvent("dblclick", at));
@@ -825,6 +830,9 @@ export async function runSelftest() {
     napi().setActiveTool({ type: "text" });
     await sleep(50);
     canvas.dispatchEvent(new PointerEvent("pointerdown", { ...at, pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true }));
+    // 按下和抬起之间要让出事件循环（真的点击也是两个任务）：React 要先把 pointerdown 里的 newElement 提交，
+    // Excalidraw 的 pointerup 才会建输入框；连着派发会留下「在写字、却没有输入框」，后面的撤销和快捷键全被挡住
+    await sleep(50);
     canvas.dispatchEvent(new PointerEvent("pointerup", { ...at, pointerId: 1, pointerType: "mouse", button: 0, isPrimary: true }));
     await sleep(120);
     const ed2 = napi().getAppState().editingTextElement;

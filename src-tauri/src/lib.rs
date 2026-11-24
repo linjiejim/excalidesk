@@ -17,6 +17,7 @@ use tauri_plugin_dialog::DialogExt;
 
 mod doc;
 mod fps;
+mod headless;
 mod history;
 mod icloud;
 pub mod mcp;
@@ -30,7 +31,7 @@ static FPS_UNLOCKED: AtomicBool = AtomicBool::new(false);
 /// 前端确认所有文档都保存完之后才允许关窗 / 退出
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
 
-/// 启动参数：--fps=60|120 --env=<标签> --results=<目录> --state=<状态文件> --bench --selftest --autoquit
+/// 启动参数：--fps=60|120 --env=<标签> --results=<目录> --state=<状态文件> --bench --selftest --autoquit --headless
 #[derive(Clone)]
 struct Opts {
     fps: u32,
@@ -45,6 +46,8 @@ struct Opts {
     vibrant: bool,
     /// MCP 端到端自测：Agent 一等反馈，前端就替用户加一条批注并点「发回」（bench/mcp-e2e.py）
     mcp_selftest: bool,
+    /// 自测不占屏幕：窗口停在屏幕外、不抢前台、Dock 里没有图标（headless.rs）
+    headless: bool,
 }
 
 fn parse_opts() -> Opts {
@@ -59,6 +62,7 @@ fn parse_opts() -> Opts {
         icloud_probe: false,
         vibrant: false,
         mcp_selftest: false,
+        headless: false,
     };
     for a in std::env::args().skip(1) {
         if let Some(v) = a.strip_prefix("--fps=") {
@@ -81,6 +85,8 @@ fn parse_opts() -> Opts {
             o.mcp_selftest = true;
         } else if a == "--icloud-probe" {
             o.icloud_probe = true;
+        } else if a == "--headless" {
+            o.headless = true;
         }
     }
     if o.env.is_empty() {
@@ -597,7 +603,14 @@ async fn external_edit(path: String, element: serde_json::Value) -> Result<(), S
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let o = parse_opts();
-    let app = tauri::Builder::default()
+    #[cfg(target_os = "macos")]
+    let headless = o.headless;
+    let builder = tauri::Builder::default();
+    // 无头自测：启动时不抢前台（默认会 activateIgnoringOtherApps:YES，把用户手上的 App 挤到后面）
+    #[cfg(target_os = "macos")]
+    let builder = builder.activate_ignoring_other_apps(!o.headless);
+    #[allow(unused_mut)]
+    let mut app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(o.clone())
@@ -638,9 +651,9 @@ pub fn run() {
             let query = if o.bench {
                 format!("index.html?bench=1&env={}", o.env)
             } else if o.selftest {
-                "index.html?selftest=1".to_string()
+                format!("index.html?selftest=1{}", if o.headless { "&headless=1" } else { "" })
             } else if o.mcp_selftest {
-                "index.html?mcpselftest=1".to_string()
+                format!("index.html?mcpselftest=1{}", if o.headless { "&headless=1" } else { "" })
             } else {
                 "index.html".to_string()
             };
@@ -650,16 +663,34 @@ pub fn run() {
                 .inner_size(1360.0, 900.0)
                 .min_inner_size(720.0, 480.0)
                 .disable_drag_drop_handler();
+            // 无头自测：无边框窗口停在所有屏幕之外、不拿焦点。有标题栏的窗口会被 AppKit 拉回来、在屏幕边上留 40px，无边框的不会。
+            // 先不显示：等关掉 WebKit 的遮挡检测再显示（见下面）
+            if o.headless {
+                builder = builder.decorations(false).position(-20000.0, 100.0).focused(false).visible(false);
+            }
             // 标题栏透明、红绿灯叠在内容上，标题栏和标签栏合成一条。
             // 不用窗口透明 + 毛玻璃：实测透明 WKWebView 每帧要带 alpha 合成，30% 缩放平移从 47fps 掉到 24fps。
             #[cfg(target_os = "macos")]
-            if !o.bench || o.vibrant {
+            if (!o.bench || o.vibrant) && !o.headless {
                 builder = builder
                     .title_bar_style(tauri::TitleBarStyle::Overlay)
                     .hidden_title(true)
                     .traffic_light_position(tauri::LogicalPosition::new(16.0, 20.0));
             }
             let win = builder.build()?;
+            if o.headless {
+                // 关掉 WebKit 的遮挡检测，屏幕外的页面才不会被当成隐藏（rAF 停、定时器降频）。
+                // 必须在窗口显示之前关：窗口已经在屏幕外显示了再关，页面会一直停在 hidden（实测），要重新显示一次才会重新判断。
+                // 系统里没有这个私有 API 时把窗口挪回屏幕上：自测照常跑完，只是看得见。show 只是 orderFront，不会把 App 拉到前台
+                let w = win.clone();
+                win.with_webview(move |wv| {
+                    if !unsafe { headless::disable_occlusion_detection(wv.inner()) } {
+                        eprintln!("--headless: WKWebView has no _setWindowOcclusionDetectionEnabled:, showing the window on screen");
+                        let _ = w.set_position(tauri::LogicalPosition::new(80.0, 80.0));
+                    }
+                    let _ = w.show();
+                })?;
+            }
             let handle = app.handle().clone();
             win.on_window_event(move |ev| {
                 if let WindowEvent::CloseRequested { api, .. } = ev {
@@ -690,6 +721,11 @@ pub fn run() {
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
+    // 无头自测：不在 Dock 和 ⌘Tab 里出现，也不接管菜单栏。要在 run 之前设：setup 里设是启动之后才生效，Dock 图标会先闪一下
+    #[cfg(target_os = "macos")]
+    if headless {
+        app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+    }
 
     app.run(|app, event| match event {
         // Finder 双击 / 拖到 Dock 图标：冷启动也走这里，先存起来，前端加载好后来取

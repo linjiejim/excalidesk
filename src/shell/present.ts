@@ -169,8 +169,15 @@ const block = (e: Event) => {
   e.stopPropagation();
 };
 
+// 无头自测（--headless，窗口在屏幕外）：不真的进全屏，那会把窗口挪进新的桌面空间、抢到前台。只记下状态，自测照样能核对
+const headless = new URLSearchParams(location.search).get("headless") === "1";
+
 async function setFullscreen(on: boolean) {
   if (!inTauri) return;
+  if (headless) {
+    setState({ fullscreen: on });
+    return;
+  }
   const { getCurrentWindow } = await import("@tauri-apps/api/window");
   await getCurrentWindow().setFullscreen(on).catch(() => {});
 }

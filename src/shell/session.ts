@@ -8,7 +8,7 @@ import { CaptureUpdateAction, getSceneVersion, reconcileElements, restoreAppStat
 import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
-import { bump, isOpenComment, nonce as newNonce, reorder, unreorder, type Order } from "./elements";
+import { bump, isOpenComment, isFolded, noteView, nonce as newNonce, reorder, unfold, unreorder, viewMismatch, type Order } from "./elements";
 
 type El = { id: string; version: number; versionNonce: number; isDeleted?: boolean; [k: string]: unknown };
 type Files = Record<string, { id: string; [k: string]: unknown }>;
@@ -21,10 +21,16 @@ const nonce = newNonce;
 /** 兜底：挂载后这段时间内、用户还没动过画布时，Excalidraw 自己做的规整不算改动 */
 const SETTLE_MS = 4000;
 
+/** 收起批注的显示形态只该在画布上（elements.ts fold）。存出去、交给 Agent 之前一律还原 */
+const stored = (els: readonly El[]) => (els.some((e) => isFolded(e as any)) ? els.map((e) => unfold(e as any) as El) : (els as El[]));
+/** 画布该有的样子（按当前「收起批注」开关） */
+const shown = (els: readonly El[]) => noteView(els as any, getState().notesFolded) as unknown as readonly El[];
+
 const parse = (text: string) => {
   const data = text.trim() ? JSON.parse(text) : {};
   return {
-    elements: restoreElements(data.elements ?? [], null, { repairBindings: true }) as unknown as El[],
+    // stored：万一哪条路漏了，文件里带着显示形态，读进来时也还原（自愈）
+    elements: stored(restoreElements(data.elements ?? [], null, { repairBindings: true }) as unknown as El[]),
     // 和 Excalidraw 挂载时做的规整保持一致（补齐 gridStep 等默认值），否则一打开就会被当成「有改动」
     appState: restoreAppState(data.appState ?? {}, null) as unknown as Record<string, unknown>,
     files: (data.files ?? {}) as Files,
@@ -108,7 +114,7 @@ export class DocSession {
   initialData() {
     const vp = getState().viewports[this.path];
     return {
-      elements: this.elements as any,
+      elements: shown(this.elements) as any,
       files: this.files as any,
       appState: {
         ...persisted(this.appState),
@@ -161,7 +167,8 @@ export class DocSession {
       this.needsPush = false;
       if (elements !== this.elements) {
         this.api.addFiles(Object.values(this.files));
-        this.api.updateScene({ elements: this.elements, captureUpdate: CaptureUpdateAction.NEVER });
+        // shown：apply 之后可能又切换过「收起批注」
+        this.api.updateScene({ elements: shown(this.elements), captureUpdate: CaptureUpdateAction.NEVER });
         return;
       }
     }
@@ -169,6 +176,8 @@ export class DocSession {
     this.appState = appState;
     this.files = files;
     const v = getSceneVersion(elements as any);
+    // 收起 / 展开批注本身不改版本号；版本号变了（撤销重做、转换形状收起、别处换了场景）才可能把批注弄回不该有的样子
+    if (v !== this.lastVersion && viewMismatch(elements as any, getState().notesFolded)) this.scheduleNoteView();
     const ak = JSON.stringify(persisted(appState));
     let newFile = false;
     for (const id in files) if (!this.sentFiles.has(id)) { newFile = true; break; }
@@ -228,7 +237,8 @@ export class DocSession {
   private async doSave() {
     const els = this.elements;
     const versionAtStart = this.lastVersion;
-    const upserts = this.fullSync ? els : els.filter((e) => this.saved.get(e.id) !== keyOf(e));
+    // 收起的批注存原样（还原不改版本号，saved 里的键照样对得上）
+    const upserts = stored(this.fullSync ? els : els.filter((e) => this.saved.get(e.id) !== keyOf(e)));
     const newFiles = Object.values(this.files).filter((f) => !this.sentFiles.has(f.id));
     const body = new TextEncoder().encode(
       `{"upserts":${JSON.stringify(upserts)},"appState":${JSON.stringify(persisted(this.appState))},"files":${JSON.stringify(newFiles)}}`,
@@ -257,15 +267,17 @@ export class DocSession {
     return { ...this.current(), files: (this.api ? this.api.getFiles() : this.files) as Files };
   }
 
+  /** 元素一律是原样（收起批注的显示形态已还原）：Agent、合并、另存为、历史都从这里读 */
   private current() {
     return {
-      elements: (this.api ? this.api.getSceneElementsIncludingDeleted() : this.elements) as El[],
+      elements: stored((this.api ? this.api.getSceneElementsIncludingDeleted() : this.elements) as El[]),
       appState: this.api ? this.api.getAppState() : this.appState,
     };
   }
 
-  /** 把一组新元素放进画布；undoable=true 时用户可以 ⌘Z 撤销 */
-  private apply(next: readonly El[], files: Files, undoable: boolean) {
+  /** 把一组新元素（原样）放进画布，批注按开关换成该有的样子；undoable=true 时用户可以 ⌘Z 撤销 */
+  private apply(next0: readonly El[], files: Files, undoable: boolean) {
+    const next = shown(next0);
     this.files = { ...this.files, ...files };
     this.elements = next;
     if (this.api) {
@@ -274,6 +286,49 @@ export class DocSession {
     } else {
       this.needsPush = true;
     }
+  }
+
+  /**
+   * 用户经由外壳界面做的修改（新建、编辑批注）：patch 是原样的元素，合并进画布，可撤销，按正常流程保存。
+   * 和直接 updateScene 的区别：收起批注时新元素直接是显示形态，不会闪一下。
+   */
+  applyUser(patch: readonly El[]) {
+    const cur = this.current().elements;
+    const byId = new Map(patch.map((e) => [e.id, e]));
+    const had = new Set(cur.map((e) => e.id));
+    this.settleUntil = 0;
+    this.apply([...cur.map((e) => byId.get(e.id) ?? e), ...patch.filter((e) => !had.has(e.id))], {}, true);
+  }
+
+  /** 画布上的批注按「收起批注」开关换样子：不改版本号、不进撤销、不算改动。收起时顺手取消选中批注（锁住的东西选着还能被删、被挪） */
+  applyNoteView() {
+    const api = this.api;
+    if (!api) return;
+    const els = api.getSceneElementsIncludingDeleted() as El[];
+    const next = shown(els);
+    if (next === els) return;
+    const folded = getState().notesFolded;
+    const st = api.getAppState();
+    const hidden = new Set(next.filter((e) => folded && isFolded(e as any) && !e.isDeleted).map((e) => e.id));
+    const sel = Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
+    const keep = sel.filter((id) => !hidden.has(id));
+    this.elements = next;
+    api.updateScene({
+      elements: next,
+      ...(keep.length !== sel.length ? { appState: { selectedElementIds: Object.fromEntries(keep.map((id) => [id, true])), selectedGroupIds: {} } } : {}),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }
+
+  private noteViewQueued = false;
+  /** onChange 里不能同步 updateScene（Excalidraw 还在提交这次更新）：排到微任务，画面刷新前就改好，不会闪 */
+  private scheduleNoteView() {
+    if (this.noteViewQueued) return;
+    this.noteViewQueued = true;
+    queueMicrotask(() => {
+      this.noteViewQueued = false;
+      this.applyNoteView();
+    });
   }
 
   /**

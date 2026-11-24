@@ -226,3 +226,14 @@ html:not([data-laser]) .shell.presenting .excalidraw canvas.interactive { cursor
 .excalidraw .xd-convert__item:disabled { opacity: .3; cursor: default; }
 .excalidraw .xd-convert-slot { display: contents; }
 .shell.presenting .excalidraw .xd-convert { display: none; }
+
+/* 收起后的批注小圆点（NotesLayer.tsx）：portal 进 .excalidraw，在画布之上、Excalidraw 自己的界面之下 */
+.excalidraw .xd-pins { position: absolute; inset: 0; z-index: var(--zIndex-canvasButtons, 3); overflow: hidden; pointer-events: none; }
+.shell .excalidraw button.xd-pin { position: absolute; width: 12px; height: 12px; margin: -6px 0 0 -6px; padding: 0; border: 2px solid #fff; border-radius: 50%; background: #f08c00; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); cursor: pointer; pointer-events: auto; }
+.shell .excalidraw button.xd-pin:hover, .shell .excalidraw button.xd-pin:focus-visible { z-index: 1; background: #f08c00; box-shadow: 0 0 0 4px rgba(240, 140, 0, .3), 0 1px 3px rgba(0, 0, 0, .3); outline: none; }
+.shell .excalidraw button.xd-pin.resolved, .shell .excalidraw button.xd-pin.resolved:hover { width: 10px; height: 10px; margin: -5px 0 0 -5px; background: #adb5bd; }
+.excalidraw .xd-pin__peek { display: none; position: absolute; left: 14px; top: -8px; width: max-content; max-width: 240px; max-height: calc(8 * 1.45em); overflow: hidden; padding: 6px 9px; border-radius: 8px; background: #fff9db; border: 1px solid #f5c26b; box-shadow: 0 4px 14px rgba(0, 0, 0, .14); color: #1d1d1f; font: 12.5px/1.45 -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; text-align: left; white-space: pre-wrap; pointer-events: none; }
+.excalidraw .xd-pin:hover .xd-pin__peek { display: block; }
+.excalidraw .xd-pin.resolved .xd-pin__peek { background: #f1f3f5; border-color: #ced4da; color: #495057; }
+.shell.presenting .excalidraw .xd-pins { display: none; }
+.shell .agent-bar button.link[aria-pressed="true"] { background: var(--hover); }

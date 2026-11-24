@@ -30,6 +30,50 @@ export const commentOf = (e: El): string | undefined => ext(e)?.commentOf;
 /** 批注便签或它的附属元素 */
 export const isCommentLike = (e: El) => isComment(e) || !!commentOf(e);
 export const isOpenComment = (e: El) => !e.isDeleted && isComment(e) && ext(e)!.comment.status !== "resolved";
+/** 这个元素属于哪条批注（便签本身、里面的文字、箭头）；不是批注的部分返回 undefined */
+export const noteIdOf = (e: El): string | undefined => (isComment(e) ? e.id : commentOf(e));
+
+// ── 收起批注（只影响画布上的样子）─────────────────────
+// 收起时画布上的批注元素换成「显示形态」：透明、锁住（点不中、框选不到），原来的 opacity / locked 记在
+// customData.excalidesk.folded 里。版本号和 nonce 都不变，所以 Excalidraw 不记撤销、DocSession 不算改动。
+// 显示形态只活在画布上：保存、Agent 读写、另存为之前都由 DocSession 用 unfold 还原，文件里永远是原样。
+
+export const isFolded = (e: El) => !!ext(e)?.folded;
+/** 已经是显示形态：有记号、透明、锁住（撤销重做、「全部解锁」可能只改回其中一样） */
+const foldedView = (e: El) => isFolded(e) && e.opacity === 0 && e.locked === true;
+
+export function fold(e: El): El {
+  if (foldedView(e)) return e;
+  if (isFolded(e)) return { ...e, opacity: 0, locked: true };
+  return { ...e, opacity: 0, locked: true, customData: { ...e.customData, excalidesk: { ...ext(e), folded: { opacity: e.opacity ?? 100, locked: !!e.locked } } } };
+}
+
+export function unfold<T extends El>(e: T): T {
+  const f = ext(e)?.folded;
+  if (!f) return e;
+  const { folded: _, ...rest } = ext(e)!;
+  return { ...e, opacity: f.opacity, locked: f.locked, customData: { ...e.customData, excalidesk: rest } };
+}
+
+/** 整个场景换成该有的样子：收起时批注（没删的）都是显示形态，展开时没有一个带记号。没变就返回原数组 */
+export function noteView<T extends El>(els: readonly T[], folded: boolean): readonly T[] {
+  let out: T[] | null = null;
+  els.forEach((e, i) => {
+    const want = folded && !e.isDeleted && isCommentLike(e) ? (fold(e) as T) : unfold(e);
+    if (want !== e) (out ??= [...els])[i] = want;
+  });
+  return out ?? els;
+}
+
+/** 场景和该有的样子对不上（撤销重做、合并、别的代码换了整个场景之后） */
+export const viewMismatch = (els: readonly El[], folded: boolean) =>
+  els.some((e) => (folded && !e.isDeleted && isCommentLike(e) ? !foldedView(e) : isFolded(e)));
+
+/** 收起后小圆点的位置：有箭头就在箭头指着的那一头（目标元素旁边），没有就在便签左上角 */
+export function pinPoint(note: El, arrow: El | undefined): { x: number; y: number } {
+  const last = arrow?.points?.[arrow.points.length - 1];
+  return arrow && last ? { x: arrow.x + last[0], y: arrow.y + last[1] } : { x: note.x, y: note.y };
+}
 
 export const nonce = () => (Math.random() * 2 ** 31) | 0;
 export const randomId = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);

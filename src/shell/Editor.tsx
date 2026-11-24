@@ -7,10 +7,12 @@ import type { DocSession } from "./session";
 import { exportActive, toggleHistory } from "./actions";
 import { startComment } from "./agent";
 import { ConvertLayer, convertKey, onConvertChange, onConvertScroll } from "./ConvertMenu";
-import { t } from "./i18n";
+import { t, useT } from "./i18n";
+import { guardFoldedClick, NotesLayer, onNotesChange, toggleNotes } from "./NotesLayer";
 import { exportPdf } from "./pdf";
 import { togglePresentation } from "./present";
 import { addNotes, newSlide } from "./slides";
+import { useShell } from "./store";
 
 const UI_OPTIONS = {
   canvasActions: { loadScene: false, saveToActiveFile: false, export: false as const, saveAsImage: false, toggleTheme: null },
@@ -25,6 +27,7 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
     (elements: any, appState: any, files: any) => {
       session.onChange(elements, appState, files);
       onConvertChange(session, appState);
+      onNotesChange(elements, appState);
     },
     [session],
   );
@@ -35,24 +38,35 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
     },
     [session],
   );
-  // Tab / ⇧Tab / ⇧R ⇧D ⇧O ⇧T：转换形状（ConvertMenu.tsx）。C：给选中的元素加批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按不冲突）
+  // Tab / ⇧Tab / ⇧R ⇧D ⇧O ⇧T：转换形状（ConvertMenu.tsx）。
+  // C：给选中的元素加批注，选中的是批注就改它；⇧C：收起 / 展开批注（Excalidraw 只在配合 ⌘⌥ / ⌥⇧ 时用 C，单按和 ⇧C 都不冲突）
   const onKey = useCallback(
     (e: React.KeyboardEvent) => {
       session.userInput();
       if (convertKey(session, e, presenting)) return;
-      if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey || e.repeat || e.nativeEvent.isComposing) return;
+      if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.nativeEvent.isComposing) return;
       if (e.code !== "KeyC" && e.key.toLowerCase() !== "c") return;
       if ((e.target as HTMLElement).closest?.("input, textarea, select, [contenteditable='true']")) return;
       if (session.api?.getAppState().editingTextElement) return;
+      if (e.shiftKey && presenting) return;
       e.preventDefault();
       e.stopPropagation();
-      startComment(session);
+      if (e.shiftKey) toggleNotes();
+      else startComment(session);
     },
     [session, presenting],
   );
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      session.userInput();
+      guardFoldedClick(session, e, "pointerdown");
+    },
+    [session],
+  );
+  const onDoubleClick = useCallback((e: React.MouseEvent) => void guardFoldedClick(session, e, "dblclick"), [session]);
   return (
     // 捕获阶段记录「用户动过画布」：之前 Excalidraw 自己的规整（重新测量文字等）不算改动
-    <div ref={setHost} className="excalidraw-host" onPointerDownCapture={session.userInput} onKeyDownCapture={onKey}>
+    <div ref={setHost} className="excalidraw-host" onPointerDownCapture={onPointerDown} onDoubleClickCapture={onDoubleClick} onKeyDownCapture={onKey}>
       <Excalidraw
         key={session.uid}
         initialData={initialData as any}
@@ -75,6 +89,8 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
           <MainMenu.Item onSelect={() => newSlide(session)} shortcut="⌥⌘N">{t("present.newSlide")}</MainMenu.Item>
           <MainMenu.Item onSelect={() => addNotes(session)}>{t("present.addNotes")}</MainMenu.Item>
           <MainMenu.Separator />
+          <FoldNotesItem />
+          <MainMenu.Separator />
           <MainMenu.DefaultItems.ClearCanvas />
           <MainMenu.DefaultItems.ChangeCanvasBackground />
           <MainMenu.Separator />
@@ -82,7 +98,19 @@ function EditorImpl({ session, theme, lang, presenting = false }: { session: Doc
         </MainMenu>
       </Excalidraw>
       <ConvertLayer session={session} host={host} presenting={presenting} />
+      <NotesLayer session={session} host={host} presenting={presenting} />
     </div>
+  );
+}
+
+/** 主菜单里的「收起批注 / 展开批注」：自己订阅开关，切换时不用让整个 Editor 重渲染 */
+function FoldNotesItem() {
+  const t = useT();
+  const folded = useShell((s) => s.notesFolded);
+  return (
+    <MainMenu.Item onSelect={() => toggleNotes()} shortcut="⇧C">
+      {t(folded ? "notes.expand" : "notes.fold")}
+    </MainMenu.Item>
   );
 }
 

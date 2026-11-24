@@ -47,8 +47,11 @@ export type Tab = {
 
 /** 连着的 Agent（Rust 侧 mcp::host::AgentView） */
 export type AgentView = { id: number; name: string; status: "idle" | "working" | "waiting"; tool: string | null; path: string | null; files: string[]; since: number; last: number };
-/** 批注输入框：屏幕坐标 + 指向的元素 */
-export type CommentDraft = { path: string; left: number; top: number; targets: string[]; scene: { x: number; y: number } };
+/** 批注输入框：放在画布坐标 scene（跟着镜头走）+ 指向的元素。editing = 改已有的那条批注（text 是它原来的文字，resolved = 已处理，保存后重新打开） */
+export type CommentDraft = {
+  path: string; targets: string[]; scene: { x: number; y: number };
+  editing?: string; text?: string; resolved?: boolean;
+};
 
 /** 等用户处理的提示（装好的更新等重启）：不自动消失，普通 toast 也顶不掉它 */
 export type Prompt = { id: string; msg: string; action?: { label: string; run: () => void } };
@@ -79,6 +82,8 @@ export type ShellState = {
   settingsOpen: boolean;
   agents: AgentView[];
   commentDraft: CommentDraft | null;
+  /** 批注收起成小圆点：只影响画布上的样子，不写进文件；所有标签共用，重启后保留 */
+  notesFolded: boolean;
   presenting: Presenting | null;
 };
 
@@ -92,6 +97,7 @@ let state: ShellState = {
   settingsOpen: false,
   agents: [],
   commentDraft: null,
+  notesFolded: localStorage.getItem("notesFolded") === "1",
   presenting: null,
 };
 

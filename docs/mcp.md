@@ -26,6 +26,8 @@ App 没开也没关系：Agent 第一次调用工具时会在后台把它拉起�
    - **直接改**：挪、删、加、改字，都会作为 added / modified / removed 回报；
    - **批注**：选中元素按 **C**（没选就落在画布中间），输入后回车。便签自动连一根虚线箭头指向被批注的元素；
    - Agent 条上「n 条批注」可在未处理的批注之间跳转。
+   - 选中一条批注再按 **C** 是改它；改了已处理的批注会重新打开它（Agent 下次 `get_feedback` 看到 `edited: true`）。
+   - 批注多了按 **⇧C**（或 Agent 条上的「收起」）收起成小圆点：只改画布上的样子，不写进文件，Agent 照样读得到；悬停小圆点看文字，点一下打开改。见 [specs/20261124-fold-notes.md](specs/20261124-fold-notes.md)。
 4. 用户点「发回」。在等的 Agent 立刻拿到：未处理的批注（连同指向的元素）、用户的改动、一张带批注的 PNG。
 5. Agent 改图（`update_elements` / `draw` / `delete_elements`），处理完的批注 `resolve_comments` 并附一句回复：便签变灰，显示「✓ Agent: 回复」。
 
@@ -43,7 +45,7 @@ Agent 没在等时点「发回」：先记下来，下次 `wait_for_feedback` / 
 | `draw_mermaid` | Mermaid → 可编辑元素（流程图、时序图等）；`slide: true` 放进一页幻灯片 |
 | `update_elements` | 改位置、尺寸、文字 / 标签、颜色样式、箭头头部、图层（`order`: front / back）、链接、frame 名；连着的箭头跟着重新走线；挪页时它的备注跟着走；没生效的字段放在 `ignored` 里并说明原因 |
 | `delete_elements` | 删元素（标签、frame 内容一起）；用户批注不许删 |
-| `get_feedback` | 上次看过之后用户的批注和改动 |
+| `get_feedback` | 上次看过之后用户的批注（`new` 没见过，`edited` 见过之后用户改了文字）和改动 |
 | `wait_for_feedback` | 等用户点「发回」，返回 get_feedback 的内容 + PNG；超时返回「还没有反馈」 |
 | `resolve_comments` | 标记批注已处理并回复 |
 
@@ -94,7 +96,7 @@ Agent ──stdio MCP──▶ excalidesk --mcp ──Unix socket──▶ Excal
 - 只能读写工作区文件夹里的图，或者已经在标签里打开的图。路径先 `canonicalize` 再判断，符号链接绕不出去。
 - socket 只有当前用户能连。
 - 批注存在 `.excalidraw` 文件里（`customData.excalidesk.comment`），所以跟着文件走（iCloud、git、别的设备都看得到）；导出 PNG / SVG 时自动去掉，用 excalidraw.com 打开就是普通便签。
-- 批注快捷键 C：Excalidraw 只在 ⌘⌥C、⌥⇧C 上用了 C，单按 C 是空的。
+- 批注快捷键 C、⇧C：Excalidraw 只在 ⌘⌥C、⌥⇧C 上用了 C，单按 C 和 ⇧C 都是空的。
 
 ## 验证
 

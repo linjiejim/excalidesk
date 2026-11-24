@@ -4,7 +4,7 @@
 import { CaptureUpdateAction, convertToExcalidrawElements, exportToBlob, restoreElements } from "@excalidraw/excalidraw";
 import { activate, openPath, sessions } from "./actions";
 import {
-  bump, boundTextOf, boxOf, commentOf, ext, isComment, isCommentLike, isOpenComment, layoutLabel, randomId, relayoutText, REPLY_SEP, route, stamp, unionBox,
+  bump, boundTextOf, boxOf, commentOf, ext, isComment, isCommentLike, isOpenComment, layoutLabel, noteIdOf, pinPoint, randomId, relayoutText, REPLY_SEP, route, stamp, unionBox,
   type Box, type El,
 } from "./elements";
 import { t } from "./i18n";
@@ -676,10 +676,31 @@ async function playUser(agents: AgentView[]) {
 
 // ── 用户这一侧：批注、发回 ─────────────────────────────
 
-/** 按 C：给选中的元素（没选就是画布中间）开一个批注输入框 */
+/** 新建批注的样子；处理过的批注重新打开时也恢复成这样 */
+const NOTE = { bg: "#ffec99", stroke: "#f08c00", text: "#1e1e1e" };
+
+/** 选中的正好是一条批注（便签、里面的文字、箭头，或者整组）：返回它；混着别的元素、或者选了几条批注都不算 */
+function selectedNote(api: any): El | null {
+  const st = api.getAppState();
+  const byId = new Map((api.getSceneElements() as El[]).map((e) => [e.id, e]));
+  const picked = Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
+  const notes = new Set<string>();
+  for (const id of picked) {
+    const e = byId.get(id);
+    const n = e && noteIdOf(e);
+    if (!n) return null;
+    notes.add(n);
+  }
+  const [only] = notes;
+  return notes.size === 1 ? (byId.get(only) ?? null) : null;
+}
+
+/** 按 C：选中的是一条批注就改它；否则给选中的元素（没选就是画布中间）开一个新批注输入框 */
 export function startComment(s: DocSession) {
   const api = s.api;
   if (!api) return;
+  const note = selectedNote(api);
+  if (note) return editComment(s, note.id);
   const st = api.getAppState();
   const els = api.getSceneElements() as El[];
   const byId = new Map(els.map((e) => [e.id, e]));
@@ -693,9 +714,28 @@ export function startComment(s: DocSession) {
   const scene = box
     ? { x: box.x + box.w + 56, y: box.y }
     : { x: st.width / 2 / zoom - st.scrollX - 120, y: st.height / 2 / zoom - st.scrollY - 40 };
-  const left = (scene.x + st.scrollX) * zoom + st.offsetLeft;
-  const top = (scene.y + st.scrollY) * zoom + st.offsetTop;
-  setState({ commentDraft: { path: s.path, left, top, targets, scene } });
+  setState({ commentDraft: { path: s.path, targets, scene } });
+}
+
+/** 一条批注的原文（去掉 Agent 处理时追加的回复）和它的箭头 */
+function noteParts(els: readonly El[], note: El) {
+  const byId = new Map(els.map((e) => [e.id, e]));
+  const text = boundTextOf(note, byId);
+  const arrow = els.find((e) => !e.isDeleted && e.type === "arrow" && commentOf(e) === note.id);
+  return { text, arrow, original: String(text?.originalText ?? text?.text ?? "").split(REPLY_SEP)[0] };
+}
+
+/** 打开已有批注的输入框（C、点收起后的小圆点、「下一条批注」）：展开时盖在便签上，收起时贴着小圆点 */
+export function editComment(s: DocSession, noteId: string) {
+  if (!s.api) return;
+  const els = s.snapshot().elements as El[];
+  const note = els.find((e) => e.id === noteId);
+  if (!note || note.isDeleted || !isComment(note)) return;
+  const { arrow, original } = noteParts(els, note);
+  const meta = ext(note)!.comment;
+  const pin = pinPoint(note, arrow);
+  const scene = getState().notesFolded ? { x: pin.x + 10, y: pin.y + 10 } : { x: note.x, y: note.y };
+  setState({ commentDraft: { path: s.path, targets: meta.targets ?? [], scene, editing: note.id, text: original, resolved: meta.status === "resolved" } });
 }
 
 export function commitComment(text: string) {
@@ -703,15 +743,15 @@ export function commitComment(text: string) {
   setState({ commentDraft: null });
   const s = d ? sessions.get(d.path) : undefined;
   if (!d || !s?.api || !text.trim()) return;
-  const api = s.api;
-  const byId = new Map((api.getSceneElements() as El[]).map((e) => [e.id, e]));
+  if (d.editing) return saveEdit(s, d.editing, text.trim());
+  const byId = new Map((s.snapshot().elements as El[]).filter((e) => !e.isDeleted).map((e) => [e.id, e]));
   const noteId = randomId();
   const gid = randomId();
   const sk: any[] = [
     {
       type: "rectangle", id: noteId, x: d.scene.x, y: d.scene.y, width: 240, height: 56,
-      backgroundColor: "#ffec99", strokeColor: "#f08c00", fillStyle: "solid", strokeWidth: 1, roughness: 0, roundness: { type: 3 },
-      label: { text: text.trim(), fontSize: 16, textAlign: "left", verticalAlign: "top", strokeColor: "#1e1e1e" },
+      backgroundColor: NOTE.bg, strokeColor: NOTE.stroke, fillStyle: "solid", strokeWidth: 1, roughness: 0, roundness: { type: 3 },
+      label: { text: text.trim(), fontSize: 16, textAlign: "left", verticalAlign: "top", strokeColor: NOTE.text },
     },
   ];
   const box = unionBox(d.targets.map((id) => byId.get(id)).filter(Boolean) as El[]);
@@ -719,27 +759,64 @@ export function commitComment(text: string) {
     const sy = d.scene.y + 24;
     const ey = Math.min(Math.max(sy, box.y + 8), box.y + box.h - 8);
     const sx = d.scene.x - 4, ex = box.x + box.w + 6;
-    sk.push({ type: "arrow", x: sx, y: sy, points: [[0, 0], [ex - sx, ey - sy]], strokeColor: "#f08c00", strokeStyle: "dashed", strokeWidth: 1, roughness: 0, startArrowhead: null, endArrowhead: "circle" });
+    sk.push({ type: "arrow", x: sx, y: sy, points: [[0, 0], [ex - sx, ey - sy]], strokeColor: NOTE.stroke, strokeStyle: "dashed", strokeWidth: 1, roughness: 0, startArrowhead: null, endArrowhead: "circle" });
   }
   const made = (convertToExcalidrawElements(sk, { regenerateIds: false }) as unknown as El[]).map((e) => ({
     ...e,
     groupIds: [gid],
     customData: { excalidesk: e.id === noteId ? { comment: { targets: d.targets, status: "open", author: "user", at: Date.now() } } : { commentOf: noteId } },
   }));
-  api.updateScene({ elements: [...api.getSceneElementsIncludingDeleted(), ...made], captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+  s.applyUser(made);
 }
 
-/** 依次跳到未处理的批注 */
+/**
+ * 改批注的文字：便签按新文字重新排版（高度跟着文字，不小于新建时的 56）。
+ * 已处理的批注改了文字 = 有新要求：重新打开（去掉 Agent 的回复，恢复黄色），Agent 下次 get_feedback 会看到它（edited）。
+ * 文字没变就什么都不做（已处理的也不重新打开）。
+ */
+function saveEdit(s: DocSession, noteId: string, value: string) {
+  const els = s.snapshot().elements as El[];
+  const note = els.find((e) => e.id === noteId);
+  if (!note || note.isDeleted || !isComment(note)) return;
+  const { text, arrow, original } = noteParts(els, note);
+  if (value === original) return;
+  const meta = ext(note)!.comment;
+  const reopen = meta.status === "resolved";
+  const { reply: _r, resolvedBy: _b, resolvedAt: _a, ...rest } = meta;
+  const comment = reopen ? { ...rest, status: "open", editedAt: Date.now() } : { ...meta, editedAt: Date.now() };
+  const n1 = bump(note, {
+    height: 56,
+    ...(reopen ? { backgroundColor: NOTE.bg, strokeColor: NOTE.stroke, opacity: 100 } : {}),
+    customData: { ...note.customData, excalidesk: { ...ext(note), comment } },
+  });
+  const r = layoutLabel(n1, text, value);
+  const patch: El[] = [r.container];
+  // 便签原来没有文字（别处删掉了）：新配的文字也标成这条批注的一部分
+  const t1 = r.text && !text ? { ...r.text, customData: { excalidesk: { commentOf: note.id } } } : r.text;
+  if (t1) patch.push(reopen ? { ...t1, strokeColor: NOTE.text, opacity: 100 } : t1);
+  if (reopen && arrow) patch.push(bump(arrow, { strokeColor: NOTE.stroke, opacity: 100 }));
+  s.applyUser(patch);
+}
+
+/** 依次跳到未处理的批注：展开时选中它；收起时打开它的输入框（便签藏着，选中了也看不见） */
 const cursor = new Map<string, number>();
 export function nextComment(path: string) {
   const s = sessions.get(path);
   if (!s?.api) return;
-  const notes = (s.api.getSceneElements() as El[]).filter(isOpenComment).sort((a, b) => a.y - b.y || a.x - b.x);
+  const els = s.snapshot().elements as El[];
+  const notes = els.filter(isOpenComment).sort((a, b) => a.y - b.y || a.x - b.x);
   if (!notes.length) return;
   const i = ((cursor.get(path) ?? -1) + 1) % notes.length;
   cursor.set(path, i);
-  s.api.scrollToContent(notes[i], { animate: true, fitToViewport: false });
-  s.api.updateScene({ appState: { selectedElementIds: { [notes[i].id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
+  const note = notes[i];
+  if (getState().notesFolded) {
+    const { arrow } = noteParts(els, note);
+    s.api.scrollToContent(arrow ?? note, { animate: true, fitToViewport: false });
+    editComment(s, note.id);
+    return;
+  }
+  s.api.scrollToContent(note, { animate: true, fitToViewport: false });
+  s.api.updateScene({ appState: { selectedElementIds: { [note.id]: true } }, captureUpdate: CaptureUpdateAction.NEVER });
 }
 
 /** 「发回给 Agent」：不会自动发送，只有用户点了才发 */

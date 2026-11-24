@@ -14,6 +14,7 @@ import {
 } from "./actions";
 import { runSelftest } from "./selftest";
 import { commitComment, initAgents, nextComment, sendToAgent, startComment } from "./agent";
+import { toggleNotes, useViewTick } from "./NotesLayer";
 import type { AgentView } from "./store";
 import { checkForUpdates, scheduleUpdateChecks } from "./updater";
 import { isPresenting, paintMask, togglePresentation } from "./present";
@@ -763,10 +764,11 @@ function agentStatus(a: AgentView) {
   return t("agent.idle");
 }
 
-/** 画布底部：哪些 Agent 在这张图上、未处理的批注、批注（C）和「发回给 Agent」。只在有 Agent 碰过这张图或有批注时出现 */
+/** 画布底部：哪些 Agent 在这张图上、未处理的批注、批注（C）、收起批注（⇧C）和「发回给 Agent」。只在有 Agent 碰过这张图或有批注时出现 */
 function AgentBar({ tab }: { tab: Tab }) {
   const t = useT();
   const agents = useShell((s) => s.agents);
+  const folded = useShell((s) => s.notesFolded);
   const here = agents.filter((a) => a.files.includes(tab.path));
   const comments = tab.comments ?? 0;
   if (!here.length && !comments) return null;
@@ -790,6 +792,12 @@ function AgentBar({ tab }: { tab: Tab }) {
         {t("agent.comment")}
         <kbd>C</kbd>
       </button>
+      {(comments > 0 || folded) && (
+        <button className="link" title={t(folded ? "notes.expandHint" : "notes.foldHint")} aria-pressed={folded} onClick={() => { toggleNotes(); focusCanvas(); }}>
+          {t(folded ? "notes.expandShort" : "notes.foldShort")}
+          <kbd>⇧C</kbd>
+        </button>
+      )}
       <button className={`send ${waiting.length ? "primary" : ""}`} title={t("agent.sendHint")} onClick={() => sendToAgent(tab.path)}>
         {waiting.length === 1 ? t("agent.sendTo", { name: waiting[0].name }) : t("agent.send")}
       </button>
@@ -797,21 +805,46 @@ function AgentBar({ tab }: { tab: Tab }) {
   );
 }
 
-/** 按 C 弹出的批注输入框：↩ 保存，⇧↩ 换行，Esc 取消 */
+const focusCanvas = () => document.querySelector<HTMLElement>(".editor .excalidraw")?.focus({ preventScroll: true });
+
+/** 按 C 弹出的批注输入框（新建，或者改选中的那条）：↩ 保存，⇧↩ 换行，Esc 取消。钉在画布坐标上，跟着镜头走 */
 function CommentPopover({ path }: { path: string }) {
   const t = useT();
+  useViewTick();
   const draft = useShell((s) => (s.commentDraft?.path === path ? s.commentDraft : null));
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    setText("");
-    if (draft) requestAnimationFrame(() => ref.current?.focus());
+  // layout effect：改已有批注时，第一帧就是原来的文字，不会先闪一下空的输入框
+  useLayoutEffect(() => {
+    setText(draft?.text ?? "");
+    if (draft)
+      requestAnimationFrame(() => {
+        const el = ref.current;
+        if (!el) return;
+        el.focus();
+        el.setSelectionRange(el.value.length, el.value.length);
+      });
   }, [draft]);
-  if (!draft) return null;
+  const st = draft ? sessions.get(path)?.api?.getAppState() : null;
+  if (!draft || !st) return null;
   const host = document.querySelector(".editor")?.getBoundingClientRect();
-  const left = Math.min(Math.max(8, draft.left - (host?.left ?? 0)), (host?.width ?? 800) - 288);
-  const top = Math.min(Math.max(8, draft.top - (host?.top ?? 0)), (host?.height ?? 600) - 150);
-  const cancel = () => setState({ commentDraft: null });
+  const z = st.zoom.value;
+  const sx = (draft.scene.x + st.scrollX) * z + st.offsetLeft, sy = (draft.scene.y + st.scrollY) * z + st.offsetTop;
+  const left = Math.min(Math.max(8, sx - (host?.left ?? 0)), (host?.width ?? 800) - 288);
+  const top = Math.min(Math.max(8, sy - (host?.top ?? 0)), (host?.height ?? 600) - 150);
+  const unchanged = !!draft.editing && text.trim() === (draft.text ?? "").trim();
+  const what = draft.editing
+    ? t(draft.resolved ? "comment.reopen" : "comment.editing")
+    : draft.targets.length ? t("comment.targets", { n: draft.targets.length }) : t("comment.free");
+  // 关掉后把焦点还给画布：Excalidraw 和 C / ⇧C 的快捷键都挂在画布容器上，焦点留在 body 上就都不响了
+  const cancel = () => {
+    setState({ commentDraft: null });
+    focusCanvas();
+  };
+  const save = () => {
+    commitComment(text);
+    focusCanvas();
+  };
   return (
     <div className="comment-pop" style={{ left, top }} onPointerDown={(e) => e.stopPropagation()}>
       <textarea
@@ -824,13 +857,13 @@ function CommentPopover({ path }: { path: string }) {
           if (e.key === "Escape") cancel();
           else if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
             e.preventDefault();
-            commitComment(text);
+            save();
           }
         }}
       />
       <div className="comment-foot">
-        <span className="muted small">{draft.targets.length ? t("comment.targets", { n: draft.targets.length }) : t("comment.free")} · {t("comment.hint")}</span>
-        <button disabled={!text.trim()} onClick={() => commitComment(text)}>{t("comment.save")}</button>
+        <span className="muted small">{what} · {t("comment.hint")}</span>
+        <button disabled={!text.trim() || unchanged} onClick={save}>{t("comment.save")}</button>
       </div>
     </div>
   );

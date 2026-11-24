@@ -90,6 +90,9 @@ pub struct Baseline {
     pub at: u64,
     pub elements: HashMap<String, SEl>,
     pub comments: HashSet<String>,
+    /// 当时每条批注的原文：用户之后改了文字，get_feedback 标 `edited`。旧版存下的基线没有这一项，就不标
+    #[serde(default)]
+    pub comment_text: HashMap<String, String>,
 }
 
 fn s<'a>(e: &'a Value, k: &str) -> Option<&'a str> {
@@ -324,6 +327,7 @@ impl Scene {
             at,
             elements: self.elements.iter().map(|e| (e.id.clone(), e.clone())).collect(),
             comments: self.comments.iter().map(|c| c.id.clone()).collect(),
+            comment_text: self.comments.iter().map(|c| (c.id.clone(), c.text.clone())).collect(),
         }
     }
 
@@ -353,8 +357,9 @@ pub fn absorb(base: &mut Baseline, now: &Scene, ids: &HashSet<String>) {
                 base.elements.remove(id);
             }
         }
-        if now.comments.iter().any(|c| &c.id == id) {
+        if let Some(c) = now.comments.iter().find(|c| &c.id == id) {
             base.comments.insert(id.clone());
+            base.comment_text.insert(id.clone(), c.text.clone());
         }
     }
 }
@@ -427,6 +432,7 @@ pub fn feedback(base: Option<&Baseline>, now: &Scene) -> Value {
                 "text": c.text,
                 "targets": targets,
                 "new": base.is_some_and(|b| !b.comments.contains(&c.id)),
+                "edited": base.and_then(|b| b.comment_text.get(&c.id)).is_some_and(|t| t != &c.text),
                 "at": [c.x, c.y],
             })
         })
@@ -564,6 +570,29 @@ mod tests {
         assert_eq!(ch["modified"].as_array().unwrap().len(), 1);
         assert_eq!(ch["modified"][0]["id"], "b");
         assert_eq!(ch["removed"][0]["id"], "gone");
+    }
+
+    #[test]
+    fn feedback_marks_edited_comments() {
+        let note = |text: &str, status: &str| {
+            let mut n = rect("n", 200.0);
+            n["customData"] = json!({ "excalidesk": { "comment": { "targets": ["a"], "status": status } } });
+            let mut t = label("nt", "n", text);
+            t["customData"] = json!({ "excalidesk": { "commentOf": "n" } });
+            vec![rect("a", 0.0), n, t]
+        };
+        // Agent 处理过（回复追加在原文后面），用户改了文字、重新打开
+        let base = simplify(&note(&format!("make it blue{REPLY_SEP}✓ done"), "resolved")).baseline(1);
+        let f = feedback(Some(&base), &simplify(&note("make it green", "open")));
+        assert_eq!(f["comments"][0]["edited"], true);
+        assert_eq!(f["comments"][0]["new"], false);
+        // 文字没变（只是看过）：不算改过
+        let same = simplify(&note("make it blue", "open"));
+        assert_eq!(feedback(Some(&base), &same)["comments"][0]["edited"], false);
+        // 旧版存下的基线没有 comment_text：照样能读，不标 edited
+        let old: Baseline = serde_json::from_value(json!({ "at": 1, "elements": {}, "comments": ["n"] })).unwrap();
+        let f = feedback(Some(&old), &simplify(&note("make it green", "open")));
+        assert_eq!(f["comments"][0]["edited"], false);
     }
 
     #[test]

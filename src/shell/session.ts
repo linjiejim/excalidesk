@@ -8,7 +8,7 @@ import { CaptureUpdateAction, getSceneVersion, reconcileElements, restoreAppStat
 import { t } from "./i18n";
 import { ipc, type Viewport } from "./ipc";
 import { getState, updateTab } from "./store";
-import { bump, isOpenComment, nonce as newNonce, reorder, unreorder, type Order } from "./elements";
+import { bump, isFolded, isMixed, isOpenComment, noteView, nonce as newNonce, reorder, unfold, unreorder, viewMismatch, type Order, type RealMemo } from "./elements";
 
 type El = { id: string; version: number; versionNonce: number; isDeleted?: boolean; [k: string]: unknown };
 type Files = Record<string, { id: string; [k: string]: unknown }>;
@@ -21,10 +21,12 @@ const nonce = newNonce;
 /** 兜底：挂载后这段时间内、用户还没动过画布时，Excalidraw 自己做的规整不算改动 */
 const SETTLE_MS = 4000;
 
+
 const parse = (text: string) => {
   const data = text.trim() ? JSON.parse(text) : {};
   return {
-    elements: restoreElements(data.elements ?? [], null, { repairBindings: true }) as unknown as El[],
+    // 万一哪条路漏了，文件里带着显示形态（有记号），读进来时也还原（自愈）
+    elements: noteView(restoreElements(data.elements ?? [], null, { repairBindings: true }) as any, false, false) as unknown as El[],
     // 和 Excalidraw 挂载时做的规整保持一致（补齐 gridStep 等默认值），否则一打开就会被当成「有改动」
     appState: restoreAppState(data.appState ?? {}, null) as unknown as Record<string, unknown>,
     files: (data.files ?? {}) as Files,
@@ -60,6 +62,24 @@ export class DocSession {
   private candidates: Api[] = [];
   /** apply() 时画布已挂载但 api 还没确认：等第一次 onChange 确认后再推上去，否则旧场景会把它盖掉 */
   private needsPush = false;
+  /** 批注元素上次算出的原样（elements.ts realOf）：撤销把收起记号换掉时靠它还原 */
+  private real: RealMemo = new Map();
+  /**
+   * 画布（和 this.elements）现在是不是收起的样子。和全局开关分开记：刚切换开关、或者标签在后台没挂载时，
+   * 画布还是上一种样子，判断「批注上的锁 / 透明是不是隐藏值」要按画布实际的样子来。
+   */
+  private form = false;
+
+  /** 收起批注的显示形态只该在画布上（elements.ts）。存出去、交给 Agent 之前一律还原成原样 */
+  private stored(els: readonly El[]) {
+    return noteView(els as any, this.form, false, this.real) as unknown as El[];
+  }
+  /** 把现在样子是 from 的元素换成全局开关要的样子，并记下画布换成了哪种 */
+  private shown(els: readonly El[], from: boolean) {
+    const to = getState().notesFolded;
+    this.form = to;
+    return noteView(els as any, from, to, this.real) as unknown as readonly El[];
+  }
 
   debounceMs = 800;
   maxWaitMs = 5000;
@@ -96,6 +116,7 @@ export class DocSession {
   /** 用磁盘内容作为基线 */
   private adopt(d: ReturnType<typeof parse>) {
     this.elements = d.elements;
+    this.form = false;
     this.appState = { ...d.appState };
     this.files = d.files;
     this.saved = new Map(d.elements.map((e) => [e.id, keyOf(e)]));
@@ -108,7 +129,7 @@ export class DocSession {
   initialData() {
     const vp = getState().viewports[this.path];
     return {
-      elements: this.elements as any,
+      elements: this.shown(this.elements, this.form) as any,
       files: this.files as any,
       appState: {
         ...persisted(this.appState),
@@ -161,7 +182,8 @@ export class DocSession {
       this.needsPush = false;
       if (elements !== this.elements) {
         this.api.addFiles(Object.values(this.files));
-        this.api.updateScene({ elements: this.elements, captureUpdate: CaptureUpdateAction.NEVER });
+        // shown：apply 之后可能又切换过「收起批注」
+        this.api.updateScene({ elements: this.shown(this.elements, this.form), captureUpdate: CaptureUpdateAction.NEVER });
         return;
       }
     }
@@ -169,6 +191,8 @@ export class DocSession {
     this.appState = appState;
     this.files = files;
     const v = getSceneVersion(elements as any);
+    // 收起 / 展开批注本身不改版本号；版本号变了（撤销重做、转换形状收起、别处换了场景）才可能把批注弄回不该有的样子
+    if (v !== this.lastVersion && viewMismatch(elements as any, getState().notesFolded)) this.scheduleNoteView();
     const ak = JSON.stringify(persisted(appState));
     let newFile = false;
     for (const id in files) if (!this.sentFiles.has(id)) { newFile = true; break; }
@@ -228,7 +252,8 @@ export class DocSession {
   private async doSave() {
     const els = this.elements;
     const versionAtStart = this.lastVersion;
-    const upserts = this.fullSync ? els : els.filter((e) => this.saved.get(e.id) !== keyOf(e));
+    // 收起的批注存原样（还原不改版本号，saved 里的键照样对得上）
+    const upserts = this.stored(this.fullSync ? els : els.filter((e) => this.saved.get(e.id) !== keyOf(e)));
     const newFiles = Object.values(this.files).filter((f) => !this.sentFiles.has(f.id));
     const body = new TextEncoder().encode(
       `{"upserts":${JSON.stringify(upserts)},"appState":${JSON.stringify(persisted(this.appState))},"files":${JSON.stringify(newFiles)}}`,
@@ -257,23 +282,88 @@ export class DocSession {
     return { ...this.current(), files: (this.api ? this.api.getFiles() : this.files) as Files };
   }
 
+  /** 元素一律是原样（收起批注的显示形态已还原）：Agent、合并、另存为、历史都从这里读 */
   private current() {
     return {
-      elements: (this.api ? this.api.getSceneElementsIncludingDeleted() : this.elements) as El[],
+      elements: this.stored((this.api ? this.api.getSceneElementsIncludingDeleted() : this.elements) as El[]),
       appState: this.api ? this.api.getAppState() : this.appState,
     };
   }
 
-  /** 把一组新元素放进画布；undoable=true 时用户可以 ⌘Z 撤销 */
-  private apply(next: readonly El[], files: Files, undoable: boolean) {
+  /**
+   * 把一组新元素（原样）放进画布，批注按开关换成该有的样子；undoable=true 时用户可以 ⌘Z 撤销。
+   * 收起时分两步：先以原样提交（updateScene 当场把这一步记进撤销快照），再换成显示形态（NEVER、nonce 不变，
+   * 快照不跟着换）。这样撤销记录里的批注永远是原样。两步之间不渲染，不会闪。
+   */
+  private apply(next0: readonly El[], files: Files, undoable: boolean) {
+    // next0 一定是原样（current()、读盘、合并、历史版本、Agent 的修改）：上面的锁、透明度都是真的，不按「收起时的隐藏值」算
+    const next = this.shown(next0, false);
     this.files = { ...this.files, ...files };
     this.elements = next;
     if (this.api) {
-      this.api.addFiles(Object.values(files));
-      this.api.updateScene({ elements: next, captureUpdate: undoable ? CaptureUpdateAction.IMMEDIATELY : CaptureUpdateAction.NEVER });
+      const api = this.api;
+      api.addFiles(Object.values(files));
+      const capture = undoable ? CaptureUpdateAction.IMMEDIATELY : CaptureUpdateAction.NEVER;
+      if (next === next0) api.updateScene({ elements: next, captureUpdate: capture });
+      else {
+        api.updateScene({ elements: next0, captureUpdate: capture });
+        api.updateScene({ elements: next, captureUpdate: CaptureUpdateAction.NEVER });
+      }
     } else {
       this.needsPush = true;
     }
+  }
+
+  /**
+   * 用户经由外壳界面做的修改（新建、编辑批注）：patch 是原样的元素，合并进画布，可撤销，按正常流程保存。
+   * 和直接 updateScene 的区别：收起批注时新元素直接是显示形态，不会闪一下。
+   */
+  applyUser(patch: readonly El[]) {
+    const cur = this.current().elements;
+    const byId = new Map(patch.map((e) => [e.id, e]));
+    const had = new Set(cur.map((e) => e.id));
+    this.settleUntil = 0;
+    this.apply([...cur.map((e) => byId.get(e.id) ?? e), ...patch.filter((e) => !had.has(e.id))], {}, true);
+  }
+
+  /**
+   * 画布上的批注按「收起批注」开关换样子：不改版本号、不进撤销、不算改动。收起时顺手取消选中批注（锁住的东西选着还能被删、被挪）。
+   * 撤销重做拼出来的元素（elements.ts isMixed）先抬版本、以原样写一次（NEVER：不进撤销，但撤销快照换成原样），再换样子。
+   */
+  applyNoteView() {
+    const api = this.api;
+    if (!api) return;
+    // 按画布实际的样子判断（刚切换开关时还是上一种样子）
+    const from = this.form;
+    let els = api.getSceneElementsIncludingDeleted() as El[];
+    if (els.some((e) => isMixed(e as any, from))) {
+      els = els.map((e) => (isMixed(e as any, from) ? (bump(unfold(e as any, this.real, from)) as unknown as El) : e));
+      api.updateScene({ elements: els, captureUpdate: CaptureUpdateAction.NEVER });
+    }
+    const next = this.shown(els, from);
+    if (next === els) return;
+    const folded = getState().notesFolded;
+    const st = api.getAppState();
+    const hidden = new Set(next.filter((e) => folded && isFolded(e as any) && !e.isDeleted).map((e) => e.id));
+    const sel = Object.keys(st.selectedElementIds ?? {}).filter((id) => st.selectedElementIds[id]);
+    const keep = sel.filter((id) => !hidden.has(id));
+    this.elements = next;
+    api.updateScene({
+      elements: next,
+      ...(keep.length !== sel.length ? { appState: { selectedElementIds: Object.fromEntries(keep.map((id) => [id, true])), selectedGroupIds: {} } } : {}),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }
+
+  private noteViewQueued = false;
+  /** onChange 里不能同步 updateScene（Excalidraw 还在提交这次更新）：排到微任务，画面刷新前就改好，不会闪 */
+  private scheduleNoteView() {
+    if (this.noteViewQueued) return;
+    this.noteViewQueued = true;
+    queueMicrotask(() => {
+      this.noteViewQueued = false;
+      this.applyNoteView();
+    });
   }
 
   /**
